@@ -1,9 +1,33 @@
 import { z } from "zod";
+import { getCandleHistoryCached, type CandleInterval } from "../candles";
 import { getMarketSnapshot, saveMarketSnapshot } from "../db";
 import { callTradingViewTool, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 
 const timeframe = z.enum(["5m", "15m", "1h", "4h", "1D", "1W", "1M"]);
+const candleInterval = z.enum(["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"]);
+const candleRange = z.enum(["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"]);
+
+function intervalToRange(interval: CandleInterval): string {
+  switch (interval) {
+    case "1m":
+    case "5m":
+      return "1d";
+    case "15m":
+    case "30m":
+      return "5d";
+    case "60m":
+      return "1mo";
+    case "1d":
+      return "6mo";
+    case "1wk":
+      return "2y";
+    case "1mo":
+      return "5y";
+    default:
+      return "6mo";
+  }
+}
 const toolName = z.enum(TRADINGVIEW_TOOL_NAMES);
 
 async function cached<T>(
@@ -88,4 +112,17 @@ export const marketRouter = router({
   callTool: protectedProcedure
     .input(z.object({ name: toolName, args: z.record(z.string(), z.unknown()).default({}) }))
     .mutation(({ input }) => callTradingViewTool(input.name, input.args)),
+
+  candles: protectedProcedure
+    .input(
+      z.object({
+        symbol: z.string().min(1).max(32),
+        exchange: z.string().min(1).max(32),
+        interval: candleInterval.default("1d"),
+        range: candleRange.optional(),
+      }),
+    )
+    .query(({ input }) =>
+      getCandleHistoryCached(input.symbol, input.exchange, input.interval, input.range ?? intervalToRange(input.interval)),
+    ),
 });
