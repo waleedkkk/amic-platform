@@ -21,7 +21,18 @@ export function findValue(value: unknown, candidates: string[], depth = 0): unkn
   if (depth > 4 || !value || typeof value !== "object") return undefined;
   const record = safeRecord(value);
   for (const [key, candidateValue] of Object.entries(record)) {
-    if (candidates.some(candidate => key.toLowerCase() === candidate.toLowerCase())) return candidateValue;
+    if (candidates.some(candidate => key.toLowerCase() === candidate.toLowerCase())) {
+      if (candidateValue && typeof candidateValue === "object" && !Array.isArray(candidateValue)) {
+        const nested = safeRecord(candidateValue);
+        for (const preferred of [
+          "value", "close", "current_price", "last", "level",
+          "macd_line", "histogram", "line", "signal",
+        ]) {
+          if (preferred in nested) return nested[preferred];
+        }
+      }
+      return candidateValue;
+    }
   }
   for (const candidateValue of Object.values(record)) {
     if (candidateValue && typeof candidateValue === "object") {
