@@ -104,7 +104,7 @@ export function DataTable({ rows, emptyLabel = "لا توجد بيانات مع�
         <tbody>
           {rows.map((row, index) => (
             <tr key={`${String(row.symbol ?? row.ticker ?? index)}-${index}`} className="border-b border-white/[0.045] last:border-0 hover:bg-white/[0.018]">
-              {keys.map(key => <td key={key} className="px-3 py-3 text-slate-200">{typeof row[key] === "object" ? "تفاصيل" : formatValue(row[key])}</td>)}
+              {keys.map(key => <td key={key} className={cn("px-3 py-3 text-slate-200", key === "السعر" ? "whitespace-nowrap font-mono text-[0.835rem]" : "")}>{typeof row[key] === "object" ? "تفاصيل" : formatValue(row[key])}</td>)}
             </tr>
           ))}
         </tbody>
