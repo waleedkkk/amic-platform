@@ -39,3 +39,17 @@
 - [x] استلام رمز DuckDNS (amic.duckdns.org) والتحقق من DNS يشير للخادم
 - [x] استخدام Caddy الموجود مسبقًا على الخادم: إضافة بلوك reverse_proxy إلى localhost:3000، وشهادة Let's Encrypt حصلت تلقائيًا (صالحة حتى 18 نوفمبر 2026)، HTTPS يعمل خارجيًا
 - [x] التحقق من HTTPS عبر النطاق: الصفحة وappId وportal صحيحان، market.candles 401 قبل الدخول (سليم)، والتحقق من تسجيل الدخول والمخطط يتطلب جلسة متصفح فعلية
+
+## إصلاح OAuth على النطاق الجديد (بلاغ المستخدم: التحول لتطبيق Manus)
+- [ ] تشخيص دورة OAuth على https://amic.duckdns.org (redirect URI مسموح، allowedOrigins في /auth/start)
+- [ ] إضافة النطاق الجديد للـ redirect allowed أو معالجة عدم السماح به
+- [ ] التحقق من اكتمال تسجيل الدخول على النطاق
+
+## نظام مصادقة بريد + كلمة مرور (استبدال OAuth) — طلب المستخدم
+- [x] جدول users جديد (email فريد، hash كلمة مرور bcrypt، role admin|user) + ترحيل قاعدة البيانات (drizzle 0003)
+- [x] إجراءات auth.emailAuth (تسجيل/دخول) وauth.me وauth.logout مع كوكي جلسة Secure + seedAdmin.ts عند البوت
+- [x] استبدال useAuth وstartLogin وOAuth routes في الواجهة بنموذج تسجيل دخول/تسجيل (AuthScreen)، وإخفاء OAuth نهائيًا
+- [x] مستخدم إداري افتراضي قابل للتخصيص عبر ADMIN_EMAIL/ADMIN_PASSWORD
+- [x] عزل بيانات التداول الورقي والإشارات لكل مستخدم (user_id موجود)
+- [x] اختبارات vitest لتدفق الدخول (36 اختبارًا، localAuth.test + auth.logout + candles)
+- [ ] اختبار بصري للدخول على الخادم الدائم عبر https://amic.duckdns.org ثم التسليم

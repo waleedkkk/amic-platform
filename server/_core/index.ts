@@ -3,7 +3,6 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -35,7 +34,6 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
-  registerOAuthRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",
@@ -63,4 +61,8 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+import { seedAdminUser } from "../seedAdmin";
+
+startServer()
+  .then(() => seedAdminUser().catch(error => console.error("[Admin seed] failed:", error)))
+  .catch(console.error);

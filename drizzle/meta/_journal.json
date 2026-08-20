@@ -22,6 +22,13 @@
       "when": 1787234270761,
       "tag": "0002_wakeful_warbound",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787249295028,
+      "tag": "0003_safe_ma_gnuci",
+      "breakpoints": true
     }
   ]
 }
