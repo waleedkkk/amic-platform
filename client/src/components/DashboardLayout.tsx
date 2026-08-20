@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
+import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/useMobile";
 import { Bot, CandlestickChart, ChartNoAxesCombined, LayoutDashboard, LogOut, PanelLeft, ScanSearch, Sparkles, WalletCards } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
@@ -31,7 +32,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth)), [sidebarWidth]);
   if (loading) return <DashboardLayoutSkeleton />;
   if (!user) {
-    return <div className="surface-grid flex min-h-screen items-center justify-center p-6"><div className="w-full max-w-md rounded-3xl border border-white/10 bg-card/90 p-8 text-center panel-glow"><div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/15 text-primary"><ChartNoAxesCombined className="size-7" /></div><p className="mt-6 text-xs font-semibold tracking-[0.18em] text-primary">AMIC MARKET INTELLIGENCE</p><h1 className="mt-3 text-2xl font-semibold">سجّل الدخول للوصول إلى مساحة التحليل</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">تُحفظ محفظتك الورقية وإشاراتك داخل حسابك فقط، لتبقى قراءة السوق منظمة ومستقلة.</p><Button onClick={() => startLogin()} className="mt-7 w-full">تسجيل الدخول</Button></div></div>;
+    return <div className="surface-grid flex min-h-screen items-center justify-center p-6"><div className="w-full max-w-md rounded-3xl border border-white/10 bg-card/90 p-8 text-center panel-glow"><div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/15 text-primary"><ChartNoAxesCombined className="size-7" /></div><p className="mt-6 text-xs font-semibold tracking-[0.18em] text-primary">AMIC MARKET INTELLIGENCE</p><h1 className="mt-3 text-2xl font-semibold">سجّل الدخول للوصول إلى مساحة التحليل</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">تُحفظ محفظتك الورقية وإشاراتك داخل حسابك فقط، لتبقى قراءة السوق منظمة ومستقلة.</p><Button onClick={() => { const reason = startLogin(); if (reason) toast.error(reason); }} className="mt-7 w-full">تسجيل الدخول</Button></div></div>;
   }
   return <SidebarProvider style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}><LayoutContent setSidebarWidth={setSidebarWidth}>{children}</LayoutContent></SidebarProvider>;
 }
