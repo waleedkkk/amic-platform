@@ -67,6 +67,51 @@ function decodeResult(result: unknown) {
   try {
     return JSON.parse(text) as unknown;
   } catch {
+    // The TradingView MCP sometimes emits NDJSON (several JSON objects printed one
+    // after another without an enclosing array). Try to recover a structured array.
+    try {
+      const trimmed = text.trim();
+      if (trimmed.startsWith("[")) {
+        return JSON.parse(trimmed) as unknown;
+      }
+      if (trimmed.startsWith("{")) {
+        const parts: string[] = [];
+        let depth = 0;
+        let buf = "";
+        let inStr = false;
+        let esc = false;
+        for (const ch of trimmed) {
+          buf += ch;
+          if (inStr) {
+            if (esc) {
+              esc = false;
+            } else if (ch === "\\") {
+              esc = true;
+            } else if (ch === '"') {
+              inStr = false;
+            }
+            continue;
+          }
+          if (ch === '"') {
+            inStr = true;
+          } else if (ch === "{") {
+            depth += 1;
+          } else if (ch === "}") {
+            depth -= 1;
+          }
+          if (depth === 0 && buf.trim()) {
+            parts.push(buf.trim());
+            buf = "";
+          }
+        }
+        if (buf.trim()) parts.push(buf.trim());
+        const parsed = parts.map(p => JSON.parse(p));
+        // Single object: wrap so callers always get an iterable structure.
+        return parsed.length === 1 ? parsed[0] : parsed;
+      }
+    } catch {
+      // Fall through and return the raw text.
+    }
     return text;
   }
 }
