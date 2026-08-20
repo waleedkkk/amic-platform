@@ -1,0 +1,13 @@
+.git
+.manus-logs
+node_modules
+dist
+.env
+.env.*
+!.env.example
+coverage
+*.log
+README.md
+services/tradingview-mcp/.venv
+services/tradingview-mcp/__pycache__
+services/tradingview-mcp/**/*.pyc

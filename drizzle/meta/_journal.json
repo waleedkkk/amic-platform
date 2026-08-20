@@ -1,5 +1,27 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1787233631425,
+      "tag": "0000_moaning_expediter",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1787234193050,
+      "tag": "0001_massive_krista_starr",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787234270761,
+      "tag": "0002_wakeful_warbound",
+      "breakpoints": true
+    }
+  ]
 }
