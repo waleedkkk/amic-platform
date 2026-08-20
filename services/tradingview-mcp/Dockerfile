@@ -26,6 +26,16 @@ COPY --from=builder /usr/local/bin/tradingview-mcp /usr/local/bin/tradingview-mc
 # Copy app source (needed for coinlist data files etc.)
 COPY --from=builder /app /app
 
+# Patch to disable MCP SDK Host-header (DNS rebinding) validation inside
+# containers: FastMCP enables it by default on 127.0.0.1, which rejects all
+# internal Docker network requests with HTTP 421.
+COPY sitecustomize.py /usr/local/lib/python3.11/site-packages/sitecustomize.py
+
+# Health-check workaround: the default GET /health endpoint returns 404 in
+# streamable-http mode (the endpoint exists but responds 406 before session
+# setup). A small script treats 406 as healthy.
+COPY healthcheck-fix.py /app/healthcheck-fix.py
+
 # Create non-root user for security
 RUN useradd -m mcpuser && chown -R mcpuser:mcpuser /app
 USER mcpuser
