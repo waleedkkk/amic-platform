@@ -1,12 +1,14 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Panel } from "@/components/market-ui";
 import { trpc } from "@/lib/trpc";
 import { aiProviderDefinitions, aiProviderIds, type AiProviderId } from "@shared/aiProviders";
-import { Activity, CheckCircle2, EyeOff, KeyRound, Loader2, ShieldAlert, Trash2, Zap } from "lucide-react";
+import { Activity, Check, CheckCircle2, ChevronDown, EyeOff, KeyRound, Loader2, RefreshCw, ShieldAlert, Trash2, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type Provider = AiProviderId;
@@ -23,6 +25,8 @@ type ProviderSetting = {
   isActive: boolean;
   updatedAt: Date | string | null;
 };
+
+type CatalogModel = { id: string; label: string; owner: string | null };
 
 function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (typeof providers)[number] }) {
   const utils = trpc.useUtils();
@@ -47,8 +51,11 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
     onSuccess: result => setStatus(result.message),
     onError: error => setStatus(error.message),
   });
+  const listModels = trpc.auth.admin.ai.listModels.useMutation();
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(setting.model || meta.defaultModel);
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [maxOutputTokens, setMaxOutputTokens] = useState(String(setting.maxOutputTokens || 900));
   const [enabled, setEnabled] = useState(setting.enabled);
   const [status, setStatus] = useState<string | null>(null);
@@ -58,6 +65,35 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
     setMaxOutputTokens(String(setting.maxOutputTokens || 900));
     setEnabled(setting.enabled);
   }, [meta.defaultModel, setting.enabled, setting.maxOutputTokens, setting.model]);
+
+  const loadCatalog = (announce: boolean) => {
+    const key = apiKey.trim();
+    if (!key && !setting.configured) {
+      if (announce) setStatus("أدخل مفتاح API لجلب النماذج المتاحة قبل الحفظ.");
+      return;
+    }
+    if (announce) setStatus(null);
+    listModels.mutate(
+      { provider: meta.id, apiKey: key || undefined },
+      {
+        onSuccess: result => {
+          if (!result.success) {
+            if (announce) setStatus(result.message);
+            return;
+          }
+          setCatalogModels(result.models);
+          if (announce) setStatus(`تم جلب ${result.models.length} نموذجًا من ${meta.name}.`);
+        },
+        onError: error => { if (announce) setStatus(error.message); },
+      },
+    );
+  };
+
+  useEffect(() => {
+    if (setting.configured && !catalogModels.length && !listModels.isPending) loadCatalog(false);
+  // يُعاد الجلب عند توفر مفتاح محفوظ أو تبديل المزود، وليس عند كل تغيير في حقل النموذج.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta.id, setting.configured]);
 
   const saveProvider = (makeActive: boolean) => {
     setStatus(null);
@@ -82,6 +118,7 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
   };
 
   const updatedAt = setting.updatedAt ? new Date(setting.updatedAt).toLocaleDateString("ar", { dateStyle: "medium" }) : null;
+  const selectedCatalogModel = catalogModels.find(item => item.id === model);
 
   return (
     <Panel className={`relative overflow-hidden p-5 ${setting.isActive ? "border-primary/45 bg-primary/[0.045]" : ""}`}>
@@ -117,8 +154,35 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
           <p className="flex items-center gap-1.5 text-[11px] leading-5 text-muted-foreground"><EyeOff className="size-3.5" />لا يُعرض المفتاح ولا يمكن استعادته بعد الحفظ؛ يظهر التلميح المقنّع فقط. اختبار الاتصال لا يحفظ المفتاح.</p>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor={`${meta.id}-model`}>اسم النموذج الافتراضي</Label>
+          <div className="flex items-center justify-between gap-2"><Label htmlFor={`${meta.id}-model`}>اسم النموذج الافتراضي</Label><span className="text-[11px] text-muted-foreground">اختياري يدويًا</span></div>
+          <div className="flex flex-wrap gap-2">
+            <Popover open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" role="combobox" aria-expanded={modelPickerOpen} disabled={!catalogModels.length} className="min-w-0 flex-1 justify-between border-white/10 bg-black/15 font-mono text-xs hover:bg-white/[0.06]">
+                  <span className="truncate" dir="ltr">{selectedCatalogModel?.label ?? (catalogModels.length ? "اختر نموذجًا من القائمة" : "اجلب النماذج لعرض القائمة")}</span><ChevronDown className="mr-2 size-4 shrink-0 opacity-60" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[min(28rem,calc(100vw-3rem))] p-0">
+                <Command dir="ltr">
+                  <CommandInput placeholder="ابحث عن نموذج…" />
+                  <CommandList className="max-h-72">
+                    <CommandEmpty>لا توجد نتيجة مطابقة.</CommandEmpty>
+                    <CommandGroup heading="النماذج المتاحة">
+                      {catalogModels.map(item => <CommandItem key={item.id} value={`${item.label} ${item.id} ${item.owner ?? ""}`} onSelect={() => { setModel(item.id); setModelPickerOpen(false); }}>
+                        <Check className={`mr-2 size-4 ${item.id === model ? "opacity-100" : "opacity-0"}`} />
+                        <span className="min-w-0 flex-1 truncate">{item.label}</span>{item.owner ? <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{item.owner}</span> : null}
+                      </CommandItem>)}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <Button type="button" size="sm" variant="outline" className="border-white/10" onClick={() => loadCatalog(true)} disabled={listModels.isPending || save.isPending || removeKey.isPending}>
+              {listModels.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}<span className="sr-only">جلب النماذج</span>
+            </Button>
+          </div>
           <Input id={`${meta.id}-model`} dir="ltr" value={model} onChange={event => setModel(event.target.value)} placeholder={meta.defaultModel} className="border-white/10 bg-black/15 font-mono text-sm" />
+          <p className="text-[11px] text-muted-foreground">تُجلب القائمة من الخادم فقط؛ يمكنك اختيار نموذج أو كتابة معرّف نموذج يدويًا.</p>
         </div>
         <div className="grid gap-2">
           <Label htmlFor={`${meta.id}-max-tokens`}>الحد الأقصى لطول الإجابة (Tokens)</Label>
@@ -138,16 +202,16 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
       {updatedAt ? <p className="mt-3 text-[11px] text-muted-foreground">آخر تعديل: {updatedAt}</p> : null}
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" className="border-sky-400/35 text-sky-200 hover:bg-sky-400/10" onClick={testProviderConnection} disabled={testConnection.isPending || save.isPending || removeKey.isPending}>
+        <Button size="sm" variant="outline" className="border-sky-400/35 text-sky-200 hover:bg-sky-400/10" onClick={testProviderConnection} disabled={testConnection.isPending || listModels.isPending || save.isPending || removeKey.isPending}>
           {testConnection.isPending ? <Loader2 className="ml-1.5 size-4 animate-spin" /> : <Activity className="ml-1.5 size-4" />}اختبار الاتصال
         </Button>
-        <Button size="sm" onClick={() => saveProvider(false)} disabled={save.isPending || testConnection.isPending || removeKey.isPending}>
+        <Button size="sm" onClick={() => saveProvider(false)} disabled={save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}>
           {save.isPending ? <Loader2 className="ml-1.5 size-4 animate-spin" /> : <KeyRound className="ml-1.5 size-4" />}حفظ الإعدادات
         </Button>
-        <Button size="sm" variant="outline" className="border-primary/35 text-primary hover:bg-primary/10" onClick={() => saveProvider(true)} disabled={!enabled || save.isPending || testConnection.isPending || removeKey.isPending}>
+        <Button size="sm" variant="outline" className="border-primary/35 text-primary hover:bg-primary/10" onClick={() => saveProvider(true)} disabled={!enabled || save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}>
           <Zap className="ml-1.5 size-4" />تعيين كمزود نشط
         </Button>
-        {setting.configured ? <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => { if (window.confirm(`حذف مفتاح ${meta.name} وتعطيله؟`)) removeKey.mutate({ provider: meta.id }); }} disabled={save.isPending || testConnection.isPending || removeKey.isPending}><Trash2 className="ml-1.5 size-4" />حذف المفتاح</Button> : null}
+        {setting.configured ? <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => { if (window.confirm(`حذف مفتاح ${meta.name} وتعطيله؟`)) removeKey.mutate({ provider: meta.id }); }} disabled={save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}><Trash2 className="ml-1.5 size-4" />حذف المفتاح</Button> : null}
       </div>
     </Panel>
   );

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { aiProviderSettings } from "../../drizzle/schema";
 import { decryptProviderKey, encryptProviderKey, getKeyHint } from "../aiProviderCrypto";
-import { verifyProviderConnection } from "../aiProviderVerifier";
+import { listProviderModels, verifyProviderConnection } from "../aiProviderVerifier";
 import { getDb } from "../db";
 import { adminProcedure, router } from "../_core/trpc";
 import { listTradingViewTools } from "../mcpClient";
@@ -48,6 +48,18 @@ export const adminAiRouter = router({
   testConnection: adminProcedure
     .input(z.object({ provider: providerSchema, model: z.string().trim().min(2).max(128), apiKey: z.string().trim().min(8).max(1_000) }))
     .mutation(async ({ input }) => verifyProviderConnection(input)),
+
+  listModels: adminProcedure
+    .input(z.object({ provider: providerSchema, apiKey: z.string().trim().min(8).max(1_000).optional() }))
+    .mutation(async ({ input }) => {
+      const db = requireDatabase(await getDb());
+      const [existing] = input.apiKey
+        ? []
+        : await db.select().from(aiProviderSettings).where(eq(aiProviderSettings.provider, input.provider)).limit(1);
+      const apiKey = input.apiKey ?? (existing?.encryptedApiKey ? decryptProviderKey(existing.encryptedApiKey) : null);
+      if (!apiKey) throw new Error("أدخل مفتاح API لجلب النماذج، أو احفظ مفتاحًا مشفرًا لهذا المزود أولًا.");
+      return listProviderModels({ provider: input.provider, apiKey });
+    }),
 
   save: adminProcedure
     .input(

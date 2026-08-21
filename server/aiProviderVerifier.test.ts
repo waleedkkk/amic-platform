@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { verifyProviderConnection } from "./aiProviderVerifier";
+import { listProviderModels, verifyProviderConnection } from "./aiProviderVerifier";
 
 describe("verifyProviderConnection", () => {
   it("يتحقق من مفتاح OpenAI والنموذج عبر مسار النماذج دون إرجاع المفتاح", async () => {
@@ -51,6 +51,41 @@ describe("verifyProviderConnection", () => {
 
     expect(result.valid).toBe(true);
     expect(fetcher).toHaveBeenCalledWith("https://zenmux.ai/api/v1/models/google/gemini-3.1-pro-preview", expect.objectContaining({ headers: { Authorization: "Bearer zm-test-secret" } }));
+    expect(fetcher.mock.calls[0]?.[0]).not.toContain("zm-test-secret");
+  });
+});
+
+describe("listProviderModels", () => {
+  it("يعيد نماذج OpenAI المختصرة دون المفتاح أو بيانات الاستجابة الخام", async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "gpt-4o-mini", owned_by: "openai" }] }) }));
+
+    const result = await listProviderModels({ provider: "openai", apiKey: "sk-test-secret" }, fetcher);
+
+    expect(result).toEqual({ success: true, models: [{ id: "gpt-4o-mini", label: "gpt-4o-mini", owner: "openai" }] });
+    expect(fetcher).toHaveBeenCalledWith("https://api.openai.com/v1/models", expect.objectContaining({ headers: { Authorization: "Bearer sk-test-secret" } }));
+    expect(JSON.stringify(result)).not.toContain("sk-test-secret");
+  });
+
+  it("يرشح Gemini إلى نماذج generateContent ويزيل بادئة models من المعرّف", async () => {
+    const result = await listProviderModels(
+      { provider: "google", apiKey: "AIza-test-secret" },
+      async () => ({ ok: true, status: 200, json: async () => ({ models: [
+        { name: "models/gemini-2.0-flash", displayName: "Gemini Flash", supportedGenerationMethods: ["generateContent"] },
+        { name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] },
+      ] }) }),
+    );
+
+    expect(result).toEqual({ success: true, models: [{ id: "gemini-2.0-flash", label: "Gemini Flash", owner: "Google" }] });
+    expect(JSON.stringify(result)).not.toContain("AIza-test-secret");
+  });
+
+  it("يحافظ على اسم العرض الخاص بـ ZenMux ولا يضع المفتاح في الرابط", async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "openai/gpt-5", display_name: "OpenAI: GPT-5", owned_by: "openai" }] }) }));
+
+    const result = await listProviderModels({ provider: "zenmux", apiKey: "zm-test-secret" }, fetcher);
+
+    expect(result).toEqual({ success: true, models: [{ id: "openai/gpt-5", label: "OpenAI: GPT-5", owner: "openai" }] });
+    expect(fetcher.mock.calls[0]?.[0]).toBe("https://zenmux.ai/api/v1/models");
     expect(fetcher.mock.calls[0]?.[0]).not.toContain("zm-test-secret");
   });
 });
