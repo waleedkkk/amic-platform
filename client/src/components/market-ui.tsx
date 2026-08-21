@@ -64,19 +64,19 @@ export function signalLabel(value: unknown) {
 
 export function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
   return (
-    <header className="mb-7 flex min-w-0 flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <header className="mb-5 flex min-w-0 flex-col gap-4 sm:mb-7 md:flex-row md:items-end md:justify-between">
       <div className="min-w-0">
         <p className="mb-2 text-xs font-semibold tracking-[0.16em] text-primary">{eyebrow}</p>
-        <h1 className="text-3xl font-semibold tracking-tight text-fade md:text-4xl">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-fade sm:text-3xl md:text-4xl">{title}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
-      {action ? <div className="max-w-full shrink-0 self-start">{action}</div> : null}
+      {action ? <div className="w-full max-w-full shrink-0 self-start md:w-auto">{action}</div> : null}
     </header>
   );
 }
 
 export function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <section className={cn("rounded-2xl border border-white/[0.07] bg-card/85 p-5 panel-glow", className)}>{children}</section>;
+  return <section className={cn("rounded-2xl border border-white/[0.07] bg-card/85 p-4 panel-glow sm:p-5", className)}>{children}</section>;
 }
 
 export function MetricCard({ label, value, detail, positive, icon }: { label: string; value: React.ReactNode; detail?: React.ReactNode; positive?: boolean; icon?: React.ReactNode }) {
@@ -86,18 +86,32 @@ export function MetricCard({ label, value, detail, positive, icon }: { label: st
         <span className="text-xs font-medium">{label}</span>
         {icon}
       </div>
-      <p className="mt-4 font-mono text-2xl font-medium tracking-tight text-foreground">{value}</p>
+      <p className="mt-3 font-mono text-xl font-medium tracking-tight text-foreground sm:mt-4 sm:text-2xl">{value}</p>
       {detail ? <p className={cn("mt-2 text-xs", positive === undefined ? "text-muted-foreground" : positive ? "text-emerald-300" : "text-rose-300")}>{detail}</p> : null}
     </div>
   );
 }
 
+export function dataTableKeys(rows: RecordValue[]) {
+  return Array.from(new Set(rows.flatMap(row => Object.keys(row)))).slice(0, 5);
+}
+
 export function DataTable({ rows, emptyLabel = "لا توجد بيانات معروضة حاليًا." }: { rows: RecordValue[]; emptyLabel?: string }) {
   if (!rows.length) return <div className="flex min-h-36 items-center justify-center rounded-xl border border-dashed border-white/10 text-sm text-muted-foreground">{emptyLabel}</div>;
-  const keys = Array.from(new Set(rows.flatMap(row => Object.keys(row)))).slice(0, 5);
+  const keys = dataTableKeys(rows);
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[520px] text-right text-sm">
+    <div>
+      <div className="space-y-2 sm:hidden">
+        {rows.map((row, index) => (
+          <article key={`${String(row.symbol ?? row.ticker ?? index)}-${index}`} className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-3">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+              {keys.map(key => <div key={key} className="min-w-0"><p className="text-[11px] text-muted-foreground">{key}</p><p className={cn("mt-1 truncate text-sm text-slate-200", key === "السعر" ? "font-mono" : "")}>{typeof row[key] === "object" ? "تفاصيل" : formatValue(row[key])}</p></div>)}
+            </div>
+          </article>
+        ))}
+      </div>
+      <div className="hidden overflow-x-auto sm:block">
+        <table className="w-full min-w-[520px] text-right text-sm">
         <thead className="border-b border-white/[0.07] text-xs text-muted-foreground">
           <tr>{keys.map(key => <th key={key} className="px-3 py-3 font-medium">{key}</th>)}</tr>
         </thead>
@@ -108,7 +122,8 @@ export function DataTable({ rows, emptyLabel = "لا توجد بيانات مع�
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   );
 }

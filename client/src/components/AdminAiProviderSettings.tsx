@@ -125,7 +125,7 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
   const selectedCatalogModel = catalogModels.find(item => item.id === model);
 
   return (
-    <Panel className={`relative overflow-hidden p-5 ${setting.isActive ? "border-primary/45 bg-primary/[0.045]" : ""}`}>
+    <Panel className={`relative overflow-hidden p-4 sm:p-5 ${setting.isActive ? "border-primary/45 bg-primary/[0.045]" : ""}`}>
       {setting.isActive && <div className="absolute inset-x-0 top-0 h-0.5 bg-primary" />}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -173,10 +173,10 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
         </div> : null}
         <div className="grid gap-2">
           <div className="flex items-center justify-between gap-2"><Label htmlFor={`${meta.id}-model`}>اسم النموذج الافتراضي</Label><span className="text-[11px] text-muted-foreground">اختياري يدويًا</span></div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 min-[420px]:flex-row">
             <Popover open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
               <PopoverTrigger asChild>
-                <Button type="button" variant="outline" role="combobox" aria-expanded={modelPickerOpen} disabled={!catalogModels.length} className="min-w-0 flex-1 justify-between border-white/10 bg-black/15 font-mono text-xs hover:bg-white/[0.06]">
+                <Button type="button" variant="outline" role="combobox" aria-expanded={modelPickerOpen} disabled={!catalogModels.length} className="min-h-11 min-w-0 w-full justify-between border-white/10 bg-black/15 font-mono text-xs hover:bg-white/[0.06] min-[420px]:flex-1">
                   <span className="truncate" dir="ltr">{selectedCatalogModel?.label ?? (catalogModels.length ? "اختر نموذجًا من القائمة" : "اجلب النماذج لعرض القائمة")}</span><ChevronDown className="mr-2 size-4 shrink-0 opacity-60" />
                 </Button>
               </PopoverTrigger>
@@ -195,8 +195,8 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
                 </Command>
               </PopoverContent>
             </Popover>
-            <Button type="button" size="sm" variant="outline" className="border-white/10" onClick={() => loadCatalog(true)} disabled={listModels.isPending || save.isPending || removeKey.isPending}>
-              {listModels.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}<span className="sr-only">جلب النماذج</span>
+            <Button type="button" size="sm" variant="outline" className="min-h-11 w-full border-white/10 min-[420px]:w-auto" onClick={() => loadCatalog(true)} disabled={listModels.isPending || save.isPending || removeKey.isPending}>
+              {listModels.isPending ? <Loader2 className="ml-1.5 size-4 animate-spin" /> : <RefreshCw className="ml-1.5 size-4" />}<span className="min-[420px]:sr-only">جلب النماذج</span>
             </Button>
           </div>
           <Input id={`${meta.id}-model`} dir="ltr" value={model} onChange={event => setModel(event.target.value)} placeholder={meta.defaultModel} className="border-white/10 bg-black/15 font-mono text-sm" />
@@ -219,17 +219,17 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
       {status ? <p role="status" className={`mt-3 text-xs ${(status.startsWith("تم") || status.startsWith("نجح")) ? "text-emerald-300" : "text-destructive"}`}>{status}</p> : null}
       {updatedAt ? <p className="mt-3 text-[11px] text-muted-foreground">آخر تعديل: {updatedAt}</p> : null}
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" className="border-sky-400/35 text-sky-200 hover:bg-sky-400/10" onClick={testProviderConnection} disabled={testConnection.isPending || listModels.isPending || save.isPending || removeKey.isPending}>
+      <div className="mt-5 grid gap-2 min-[500px]:grid-cols-2">
+        <Button size="sm" variant="outline" className="min-h-11 w-full border-sky-400/35 text-sky-200 hover:bg-sky-400/10" onClick={testProviderConnection} disabled={testConnection.isPending || listModels.isPending || save.isPending || removeKey.isPending}>
           {testConnection.isPending ? <Loader2 className="ml-1.5 size-4 animate-spin" /> : <Activity className="ml-1.5 size-4" />}اختبار الاتصال
         </Button>
-        <Button size="sm" onClick={() => saveProvider(false)} disabled={save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}>
+        <Button size="sm" className="min-h-11 w-full" onClick={() => saveProvider(false)} disabled={save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}>
           {save.isPending ? <Loader2 className="ml-1.5 size-4 animate-spin" /> : <KeyRound className="ml-1.5 size-4" />}حفظ الإعدادات
         </Button>
-        <Button size="sm" variant="outline" className="border-primary/35 text-primary hover:bg-primary/10" onClick={() => saveProvider(true)} disabled={!enabled || save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}>
+        <Button size="sm" variant="outline" className="min-h-11 w-full border-primary/35 text-primary hover:bg-primary/10" onClick={() => saveProvider(true)} disabled={!enabled || save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}>
           <Zap className="ml-1.5 size-4" />تعيين كمزود نشط
         </Button>
-        {setting.configured ? <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => { if (window.confirm(`حذف مفتاح ${meta.name} وتعطيله؟`)) removeKey.mutate({ provider: meta.id }); }} disabled={save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}><Trash2 className="ml-1.5 size-4" />حذف المفتاح</Button> : null}
+        {setting.configured ? <Button size="sm" variant="ghost" className="min-h-11 w-full text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => { if (window.confirm(`حذف مفتاح ${meta.name} وتعطيله؟`)) removeKey.mutate({ provider: meta.id }); }} disabled={save.isPending || listModels.isPending || testConnection.isPending || removeKey.isPending}><Trash2 className="ml-1.5 size-4" />حذف المفتاح</Button> : null}
       </div>
     </Panel>
   );

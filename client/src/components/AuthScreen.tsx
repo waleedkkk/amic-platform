@@ -54,20 +54,20 @@ export function AuthScreen() {
   }
 
   return (
-    <div className="surface-grid flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-md border-white/10 bg-card/90 p-8 text-center panel-glow">
-        <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/15 text-primary">
-          <ChartNoAxesCombined className="size-7" />
+    <div className="surface-grid flex min-h-[100dvh] items-center justify-center overflow-x-hidden p-4 sm:p-6">
+      <Card className="w-full max-w-md border-white/10 bg-card/90 p-5 text-center panel-glow sm:p-8">
+        <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary/15 text-primary sm:size-14">
+          <ChartNoAxesCombined className="size-6 sm:size-7" />
         </div>
-        <p className="mt-6 text-xs font-semibold tracking-[0.18em] text-primary">AMIC MARKET INTELLIGENCE</p>
-        <h1 className="mt-3 text-2xl font-semibold">
+        <p className="mt-5 text-[11px] font-semibold tracking-[0.14em] text-primary sm:mt-6 sm:text-xs sm:tracking-[0.18em]">AMIC MARKET INTELLIGENCE</p>
+        <h1 className="mt-3 text-xl font-semibold sm:text-2xl">
           {mode === "login" ? "تسجيل الدخول إلى مساحة التحليل" : "إنشاء حساب جديد"}
         </h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           تُحفظ محفظتك الورقية وإشاراتك داخل حسابك فقط، لتبقى قراءة السوق منظمة ومستقلة.
         </p>
 
-        <form onSubmit={submit} className="mt-7 space-y-4 text-right">
+        <form onSubmit={submit} className="mt-6 space-y-4 text-right sm:mt-7">
           {mode === "register" && (
             <div className="space-y-1.5 text-right">
               <Label htmlFor="amic-name" className="text-xs">الاسم (اختياري)</Label>
@@ -125,7 +125,7 @@ export function AuthScreen() {
             </div>
           </div>
 
-          <Button type="submit" className="w-full" disabled={isPending}>
+          <Button type="submit" className="min-h-11 w-full" disabled={isPending}>
             {isPending ? (
               <>
                 <Loader2 className="ml-2 size-4 animate-spin" />

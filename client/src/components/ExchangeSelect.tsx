@@ -16,7 +16,7 @@ export function ExchangeSelect({ label, value, onChange, className }: ExchangeSe
   return (
     <div className={className}>
       <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{label}</label>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-2 flex flex-col gap-2 min-[420px]:flex-row">
         <Select value={isSuggested ? value.toUpperCase() : "__custom__"} onValueChange={next => { if (next !== "__custom__") onChange(next); }}>
           <SelectTrigger className="min-w-0 flex-1 bg-white/[0.025] font-mono">
             <SelectValue placeholder="اختر بورصة أو اكتبها" />
@@ -30,7 +30,7 @@ export function ExchangeSelect({ label, value, onChange, className }: ExchangeSe
         <Input
           aria-label={`${label} يدويًا`}
           placeholder={isSuggested ? "بورصة أخرى…" : value || "بورصة…"}
-          className={cn("w-28 shrink-0 bg-black/15 font-mono text-xs", isSuggested && "border-dashed")}
+          className={cn("w-full shrink-0 bg-black/15 font-mono text-sm min-[420px]:w-28 min-[420px]:text-xs", isSuggested && "border-dashed")}
           value={isSuggested ? "" : value}
           onChange={event => onChange(event.target.value.toUpperCase())}
         />

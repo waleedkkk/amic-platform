@@ -249,23 +249,23 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
 
   return (
     <Card className="bg-white/[0.02]">
-      <CardContent className="pt-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <CardContent className="pt-4 sm:pt-5">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <p className="text-xs font-semibold tracking-[0.13em] text-primary">PRICE HISTORY</p>
-          <div className="flex items-center gap-1">
-            <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-1">
+            <div className="grid grid-cols-5 gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5 sm:flex sm:items-center">
               {candleIntervals.map(item => (
                 <button
                   key={item}
                   type="button"
                   onClick={() => setInterval(item)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-mono transition-colors duration-150 ${interval === item ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`min-h-10 rounded-md px-1.5 py-1 text-xs font-mono transition-colors duration-150 sm:min-h-0 sm:px-2.5 ${interval === item ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   {displayLabel[item] ?? item}
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5">
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5 sm:flex sm:items-center">
               {(
                 [
                   { key: "sma", label: "SMA" },
@@ -279,7 +279,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                   type="button"
                   onClick={() => toggle(btn.key)}
                   aria-pressed={visible[btn.key]}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-150 ${visible[btn.key] ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`min-h-10 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2.5 ${visible[btn.key] ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   {btn.label}
                 </button>
@@ -288,7 +288,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
           </div>
         </div>
         <div className="relative min-h-[220px]">
-          <div ref={containerRef} className="h-[380px] w-full" />
+          <div ref={containerRef} className="h-[300px] w-full sm:h-[380px]" />
           {candlesQuery.isLoading && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/45 backdrop-blur-[2px]">
               <Spinner className="size-5 text-primary" />
