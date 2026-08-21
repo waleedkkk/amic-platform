@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { mintSessionToken, verifySessionToken, validatePassword } from "./localAuth";
+
+const originalJwtSecret = process.env.JWT_SECRET;
+
+afterEach(() => {
+  if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
+  else process.env.JWT_SECRET = originalJwtSecret;
+});
 
 describe("local session token roundtrip", () => {
   const user = { id: 42, email: "user@example.com" };
@@ -27,6 +34,11 @@ describe("local session token roundtrip", () => {
   it("rejects malformed tokens", () => {
     expect(verifySessionToken("not-base64!!!")).toBeNull();
     expect(verifySessionToken("")).toBeNull();
+  });
+
+  it("fails closed when the signing secret is absent", () => {
+    delete process.env.JWT_SECRET;
+    expect(() => mintSessionToken(user)).toThrow("JWT_SECRET is required");
   });
 });
 

@@ -4,6 +4,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
+import { getRequiredJwtSecret } from "./env";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { handleMetalAlertsSchedule } from "../scheduledMetalAlerts";
@@ -29,6 +30,8 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  // Fail closed: a predictable or missing session secret must never reach a live server.
+  getRequiredJwtSecret();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads

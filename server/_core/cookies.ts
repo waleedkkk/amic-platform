@@ -42,7 +42,9 @@ export function getSessionCookieOptions(
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
+    // Browsers reject SameSite=None cookies unless Secure is also set.  Keep
+    // local HTTP development functional without weakening HTTPS deployments.
+    sameSite: isSecureRequest(req) ? "none" : "lax",
     secure: isSecureRequest(req),
   };
 }

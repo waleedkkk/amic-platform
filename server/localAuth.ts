@@ -2,10 +2,10 @@ import bcrypt from "bcryptjs";
 import { parse as parseCookieHeader } from "cookie";
 import { eq, or } from "drizzle-orm";
 import type { Request } from "express";
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import { COOKIE_NAME } from "@shared/const";
 import { users, type User } from "../drizzle/schema";
-import { ENV } from "./_core/env";
+import { getRequiredJwtSecret } from "./_core/env";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { getDb } from "./db";
 
@@ -55,34 +55,49 @@ function readAuthCookieValue(req: Request): string | null {
   return typeof raw === "string" ? raw : null;
 }
 
-/** Local session token = base64(userId:email:random) signed by JWT_SECRET via HMAC. */
+const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+
+type SessionPayload = {
+  email: string;
+  exp: number;
+  id: number;
+  nonce: string;
+};
+
+function signSessionPayload(encodedPayload: string): string {
+  return createHmac("sha256", getRequiredJwtSecret()).update(encodedPayload).digest("base64url");
+}
+
+/** Local session token = base64url(JSON payload).HMAC-SHA-256 signature using a required secret. */
 export function mintSessionToken(user: { id: number; email: string | null }): string {
-  const secret = ENV.cookieSecret || process.env.JWT_SECRET || "amic-local-secret";
-  const random = crypto.randomUUID().replaceAll("-", "");
-  const payload = `${user.id}:${user.email ?? ""}:${random}`;
-  const sig = createHmac("sha256", secret).update(payload).digest("hex").slice(0, 16);
-  return Buffer.from(`${payload}:${sig}`, "utf8").toString("base64url");
+  const payload: SessionPayload = {
+    id: user.id,
+    email: user.email ?? "",
+    nonce: crypto.randomUUID(),
+    exp: Date.now() + SESSION_MAX_AGE_MS,
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return `${encodedPayload}.${signSessionPayload(encodedPayload)}`;
 }
 
 export function verifySessionToken(token: string): { id: number; email: string } | null {
-  const secret = ENV.cookieSecret || process.env.JWT_SECRET || "amic-local-secret";
-  let decoded: string;
+  const [encodedPayload, signature, ...extraParts] = token.split(".");
+  if (!encodedPayload || !signature || extraParts.length > 0) return null;
+
+  const expectedSignature = signSessionPayload(encodedPayload);
+  const expectedBytes = Buffer.from(expectedSignature, "utf8");
+  const actualBytes = Buffer.from(signature, "utf8");
+  if (expectedBytes.length !== actualBytes.length || !timingSafeEqual(expectedBytes, actualBytes)) return null;
+
+  let payload: SessionPayload;
   try {
-    decoded = Buffer.from(token, "base64url").toString("utf8");
+    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as SessionPayload;
   } catch {
     return null;
   }
-  const lastColon = decoded.lastIndexOf(":");
-  if (lastColon < 0) return null;
-  const payload = decoded.slice(0, lastColon);
-  const sig = decoded.slice(lastColon + 1);
-  const expected = createHmac("sha256", secret).update(payload).digest("hex").slice(0, 16);
-  if (sig.length !== 16 || sig !== expected) return null;
-  const parts = payload.split(":");
-  if (parts.length !== 3) return null;
-  const id = Number(parts[0]);
-  if (!Number.isFinite(id)) return null;
-  return { id, email: parts[1] };
+  if (!Number.isSafeInteger(payload.id) || typeof payload.email !== "string" || typeof payload.exp !== "number") return null;
+  if (!Number.isFinite(payload.exp) || payload.exp <= Date.now()) return null;
+  return { id: payload.id, email: payload.email };
 }
 
 export async function createUserWithEmail(
@@ -147,7 +162,7 @@ export function setSessionCookie(
   const cookieOptions = getSessionCookieOptions(req);
   res.cookie(COOKIE_NAME, mintSessionToken(user), {
     ...cookieOptions,
-    maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+    maxAge: SESSION_MAX_AGE_MS,
   });
 }
 
