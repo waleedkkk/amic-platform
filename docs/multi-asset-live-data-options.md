@@ -6,7 +6,28 @@
 
 تذكر وثائق Twelve Data أنها تغطي الأسهم وFX وETF والعملات المشفرة والسلع عبر أسواق عالمية، وأن إنشاء حساب ومفتاح API مطلوبان للوصول إلى REST وWebSocket. كما تذكر صفحة بيانات الفوركس أنها تغطي أزواج العملات والمعادن الثمينة في الوقت الفعلي ضمن عروض الخدمة المناسبة. لذلك يصلح كمرشح واحد لتوحيد الأسهم وFX والمعادن، بعد مراجعة خطة الاشتراك والرموز المطلوبة قبل أي ربط إنتاجي.
 
-المصادر الرسمية: [نظرة عامة على وثائق Twelve Data](https://twelvedata.com/docs/introduction/overview)، [بيانات السوق](https://twelvedata.com/market-data)، [بيانات الفوركس والمعادن](https://twelvedata.com/forex).
+### عقد WebSocket المعتمد
+
+يستخدم البث الخادمي الرابط التالي، مع إبقاء المفتاح على الخادم وعدم تمريره إلى المتصفح:
+
+```text
+wss://ws.twelvedata.com/v1/quotes/price?apikey=<server-side-key>
+```
+
+بعد الاتصال، ترسل الخدمة حدث الاشتراك بالشكل التالي:
+
+```json
+{
+  "action": "subscribe",
+  "params": { "symbols": "AAPL,EUR/USD,XAU/USD" }
+}
+```
+
+تدعم الخدمة أحداث `subscribe` و`unsubscribe` و`reset` و`heartbeat`، وتوصي بإرسال heartbeat كل عشر ثوانٍ. يعيد البث حالات الاشتراك وأسعارًا حية، ولا يعيد قيم المؤشرات الفنية أو OHLC؛ لذلك تبقى واجهة `time_series` مكمّلة للشموع التاريخية والقصيرة.
+
+> **قيد تشغيلي:** يملك الحساب حتى ثلاث وصلات WebSocket عبر التطبيق، ويتطلب البث الكامل خطة Pro. يجب أن تشترك خدمة AMIC الخادمية بالرموز الفعالة فقط، لا أن تنشئ وصلة لكل متصفح أو مستخدم.
+
+المصادر الرسمية: [نظرة عامة على وثائق Twelve Data](https://twelvedata.com/docs/introduction/overview)، [بيانات السوق](https://twelvedata.com/market-data)، [بيانات الفوركس والمعادن](https://twelvedata.com/forex)، [دليل البث](https://support.twelvedata.com/en/articles/5620516-how-to-stream-the-data)، [الأسئلة الشائعة لـ WebSocket](https://support.twelvedata.com/en/articles/5194610-websocket-faq).
 
 ## بدائل للمقارنة
 

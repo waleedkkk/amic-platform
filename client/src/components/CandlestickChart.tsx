@@ -106,6 +106,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const [visible, setVisible] = useState<ChartLayerPreferences>(DEFAULT_CHART_LAYERS);
   const chartPreferencesQuery = trpc.market.chartPreferences.get.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
   const saveChartPreferences = trpc.market.chartPreferences.save.useMutation();
+  const structureAlertsQuery = trpc.structureAlerts.list.useQuery();
+  const createStructureAlert = trpc.structureAlerts.create.useMutation({ onSuccess: () => structureAlertsQuery.refetch() });
+  const cancelStructureAlert = trpc.structureAlerts.cancel.useMutation({ onSuccess: () => structureAlertsQuery.refetch() });
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
   const liveStreamUrl = useMemo(() => getBinanceKlineStream(symbol, exchange, interval), [symbol, exchange, interval]);
   const [liveCandle, setLiveCandle] = useState<LiveChartCandle | null>(null);
@@ -129,6 +132,15 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const [hasVolume, setHasVolume] = useState(false);
   const [structureDetail, setStructureDetail] = useState<Pick<MarketStructure, "events" | "zones">>({ events: [], zones: [] });
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const structureAlertInterval = useMemo<"5m" | "15m" | "1h" | "4h" | "1d" | "1wk" | null>(() => {
+    if (interval === "5m" || interval === "15m" || interval === "1d" || interval === "1wk") return interval;
+    if (interval === "60m") return "1h";
+    return null;
+  }, [interval]);
+  const activeStructureAlerts = useMemo(
+    () => (structureAlertsQuery.data ?? []).filter(alert => alert.symbol === symbol && alert.exchange === exchange && alert.status === "active"),
+    [exchange, structureAlertsQuery.data, symbol],
+  );
 
   useEffect(() => {
     if (chartPreferencesQuery.data?.layers) {
@@ -446,6 +458,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
               <span className={liveStatus === "live" ? "font-mono text-emerald-300" : "font-mono text-amber-300"}>
                 {liveStatus === "live" ? "● حي · Binance" : liveStatus === "connecting" || liveStatus === "reconnecting" ? "◌ جارٍ وصل البث" : "◌ بيانات مؤجلة وفق الإطار"}
               </span>
+              <span className="font-mono text-muted-foreground">
+                الشموع: {candlesQuery.data.provider === "twelve-data" ? "Twelve Data مرخّص" : "Yahoo Finance احتياطي"}
+              </span>
               {visible.sma && <span className="font-mono text-amber-400/80">━ SMA 20 ━ SMA 50</span>}
               {visible.ema && <span className="font-mono text-sky-400/80">╌ EMA 12 ┅ EMA 26</span>}
               {visible.levels && (
@@ -494,6 +509,30 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             ) : null}
           </div>
         ) : null}
+        <div className="mt-3 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold text-foreground">تنبيهات بنية السعر</p>
+              <p className="mt-0.5 text-muted-foreground">يُفحص آخر حدث مؤكد دوريًا ويُرسل لك إشعارًا داخل AMIC وتيليغرام عند تفعيله.</p>
+            </div>
+            <span className="font-mono text-[10px] text-muted-foreground">{structureAlertsQuery.isLoading ? "تحميل…" : `${activeStructureAlerts.length} نشط`}</span>
+          </div>
+          {structureAlertInterval ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {([
+                { eventType: "breakout", label: "اختراق صاعد" },
+                { eventType: "breakdown", label: "كسر هابط" },
+                { eventType: "bullish_reversal", label: "انعكاس صاعد" },
+                { eventType: "bearish_reversal", label: "انعكاس هابط" },
+              ] as const).map(option => {
+                const alreadyActive = activeStructureAlerts.some(alert => alert.interval === structureAlertInterval && alert.eventType === option.eventType);
+                return <button key={option.eventType} type="button" disabled={alreadyActive || createStructureAlert.isPending} onClick={() => createStructureAlert.mutate({ symbol, exchange, interval: structureAlertInterval, eventType: option.eventType })} className={`min-h-9 rounded-md border px-2 py-1.5 transition-colors ${alreadyActive ? "cursor-default border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-200" : "border-white/[0.12] text-muted-foreground hover:border-primary/45 hover:bg-primary/10 hover:text-primary disabled:opacity-50"}`}>{alreadyActive ? "✓ " : "+ "}{option.label}</button>;
+              })}
+            </div>
+          ) : <p className="mt-2 text-amber-300">تدعم التنبيهات حاليًا أطر 5m و15m و1h و1d و1w. اختر إطارًا مدعومًا لإضافة تنبيه.</p>}
+          {activeStructureAlerts.length > 0 ? <div className="mt-2 flex flex-wrap gap-1.5">{activeStructureAlerts.map(alert => <button key={alert.id} type="button" onClick={() => cancelStructureAlert.mutate({ id: alert.id })} disabled={cancelStructureAlert.isPending} className="rounded-md border border-rose-400/20 bg-rose-400/[0.06] px-2 py-1 text-rose-200 transition-colors hover:bg-rose-400/[0.12]">إلغاء {alert.eventType === "breakout" ? "الاختراق" : alert.eventType === "breakdown" ? "الكسر" : alert.eventType === "bullish_reversal" ? "الانعكاس الصاعد" : "الانعكاس الهابط"} · {alert.interval}</button>)}</div> : null}
+          {createStructureAlert.isError || cancelStructureAlert.isError ? <p className="mt-2 text-destructive">تعذّر تحديث التنبيه. أعد المحاولة.</p> : null}
+        </div>
       </CardContent>
     </Card>
   );

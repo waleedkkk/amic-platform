@@ -8,6 +8,7 @@ import {
   marketSnapshots,
   metalAlertMonitorSettings,
   metalAlerts,
+  structureAlerts,
   paperTrades,
   savedSignals,
   userNotifications,
@@ -287,4 +288,60 @@ export async function getMetalAlertMonitorTaskUid() {
   const db = await requireDb();
   const [settings] = await db.select().from(metalAlertMonitorSettings).where(eq(metalAlertMonitorSettings.id, 1)).limit(1);
   return settings?.scheduleTaskUid ?? null;
+}
+
+export type StructureAlertInput = {
+  symbol: string;
+  exchange: string;
+  interval: "5m" | "15m" | "1h" | "4h" | "1d" | "1wk";
+  eventType: "breakout" | "breakdown" | "bullish_reversal" | "bearish_reversal";
+};
+
+export async function listUserStructureAlerts(userId: number) {
+  const db = await requireDb();
+  return db.select().from(structureAlerts).where(eq(structureAlerts.userId, userId)).orderBy(desc(structureAlerts.createdAt));
+}
+
+export async function createUserStructureAlert(userId: number, input: StructureAlertInput) {
+  const db = await requireDb();
+  const result = await db.insert(structureAlerts).values({
+    userId,
+    symbol: input.symbol.trim().toUpperCase(),
+    exchange: input.exchange.trim().toUpperCase(),
+    interval: input.interval,
+    eventType: input.eventType,
+  });
+  return { id: Number(result[0].insertId) };
+}
+
+export async function cancelUserStructureAlert(userId: number, alertId: number) {
+  const db = await requireDb();
+  await db.update(structureAlerts).set({ status: "cancelled" }).where(and(eq(structureAlerts.id, alertId), eq(structureAlerts.userId, userId), eq(structureAlerts.status, "active")));
+  return { success: true } as const;
+}
+
+export async function listActiveStructureAlerts() {
+  const db = await requireDb();
+  return db
+    .select({ alert: structureAlerts, telegram: userTelegramSettings })
+    .from(structureAlerts)
+    .leftJoin(userTelegramSettings, eq(structureAlerts.userId, userTelegramSettings.userId))
+    .where(eq(structureAlerts.status, "active"));
+}
+
+export async function markStructureAlertTriggered(alertId: number, input: { price: string; eventKey: string; qualityScore: number }) {
+  const db = await requireDb();
+  const result = await db.update(structureAlerts).set({
+    status: "triggered",
+    triggeredPrice: input.price,
+    triggeredEventKey: input.eventKey,
+    qualityScore: input.qualityScore,
+    triggeredAt: new Date(),
+  }).where(and(eq(structureAlerts.id, alertId), eq(structureAlerts.status, "active")));
+  return Number(result[0].affectedRows) > 0;
+}
+
+export async function createStructureAlertNotification(input: { userId: number; title: string; content: string; metadata: Record<string, unknown> }) {
+  const db = await requireDb();
+  await db.insert(userNotifications).values({ ...input, category: "structure_alert" });
 }

@@ -148,12 +148,35 @@ export const metalAlerts = mysqlTable(
   }),
 );
 
+export const structureAlerts = mysqlTable(
+  "structureAlerts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    symbol: varchar("symbol", { length: 32 }).notNull(),
+    exchange: varchar("exchange", { length: 32 }).notNull(),
+    interval: mysqlEnum("interval", ["5m", "15m", "1h", "4h", "1d", "1wk"]).notNull(),
+    eventType: mysqlEnum("eventType", ["breakout", "breakdown", "bullish_reversal", "bearish_reversal"]).notNull(),
+    status: mysqlEnum("status", ["active", "triggered", "cancelled"]).default("active").notNull(),
+    triggeredPrice: decimal("triggeredPrice", { precision: 18, scale: 8 }),
+    triggeredEventKey: varchar("triggeredEventKey", { length: 96 }),
+    qualityScore: int("qualityScore"),
+    triggeredAt: timestamp("triggeredAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userStatusLookup: index("structure_alerts_user_status_idx").on(table.userId, table.status),
+    monitorLookup: index("structure_alerts_monitor_idx").on(table.status, table.exchange, table.symbol, table.interval),
+  }),
+);
+
 export const userNotifications = mysqlTable(
   "userNotifications",
   {
     id: int("id").autoincrement().primaryKey(),
     userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
-    category: mysqlEnum("category", ["metal_alert"]).notNull(),
+    category: mysqlEnum("category", ["metal_alert", "structure_alert"]).notNull(),
     title: varchar("title", { length: 180 }).notNull(),
     content: text("content").notNull(),
     metadata: json("metadata").notNull(),
@@ -196,5 +219,6 @@ export type SavedSignal = typeof savedSignals.$inferSelect;
 export type InsertSavedSignal = typeof savedSignals.$inferInsert;
 export type AiProviderSetting = typeof aiProviderSettings.$inferSelect;
 export type MetalAlert = typeof metalAlerts.$inferSelect;
+export type StructureAlert = typeof structureAlerts.$inferSelect;
 export type UserNotification = typeof userNotifications.$inferSelect;
 export type ChartPreferences = typeof chartPreferences.$inferSelect;

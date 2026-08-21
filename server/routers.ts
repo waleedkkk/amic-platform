@@ -18,6 +18,7 @@ import { marketRouter } from "./routers/market";
 import { metalAlertsRouter } from "./routers/metalAlerts";
 import { paperTradingRouter } from "./routers/paperTrading";
 import { signalsRouter } from "./routers/signals";
+import { structureAlertsRouter } from "./routers/structureAlerts";
 
 const emailInput = z.object({
   email: z.string().min(1).max(320),
@@ -73,6 +74,7 @@ export const appRouter = router({
   }),
   market: marketRouter,
   metalAlerts: metalAlertsRouter,
+  structureAlerts: structureAlertsRouter,
   paperTrading: paperTradingRouter,
   signals: signalsRouter,
   ai: aiRouter,
