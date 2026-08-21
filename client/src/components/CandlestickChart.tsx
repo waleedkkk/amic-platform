@@ -2,15 +2,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { trpc } from "@/lib/trpc";
 import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } from "@shared/movingAverageCrossover";
+import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStructure";
 import {
   CandlestickSeries,
+  createSeriesMarkers,
   createChart,
   CrosshairMode,
   HistogramSeries,
   IChartApi,
+  IPriceLine,
   ISeriesApi,
+  ISeriesMarkersPluginApi,
   LineSeries,
   LineStyle,
+  type SeriesMarker,
   type DeepPartial,
   type Time,
 } from "lightweight-charts";
@@ -85,6 +90,11 @@ interface OverlaySeries {
   volume: ISeriesApi<"Histogram">;
 }
 
+type StructureDecorations = {
+  levelLines: IPriceLine[];
+  zoneLines: IPriceLine[];
+};
+
 export function CandlestickChart(props: { symbol: string; exchange: string; onCrossoverChange?: (crossover: MovingAverageCrossover | null, interval: ChartInterval) => void }) {
   const { symbol, exchange, onCrossoverChange } = props;
   const [interval, setInterval] = useState<ChartInterval>("1d");
@@ -92,6 +102,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     sma: true,
     ema: true,
     levels: true,
+    zones: true,
+    events: true,
     volume: true,
   });
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
@@ -107,7 +119,11 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const overlaysRef = useRef<OverlaySeries | null>(null);
+  const decorationsRef = useRef<StructureDecorations>({ levelLines: [], zoneLines: [] });
+  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const [hasVolume, setHasVolume] = useState(false);
+  const [structureDetail, setStructureDetail] = useState<Pick<MarketStructure, "events" | "zones">>({ events: [], zones: [] });
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   useEffect(() => {
     onCrossoverChange?.(latestCrossover, interval);
@@ -161,6 +177,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     chartRef.current = chart;
     candleSeriesRef.current = candles;
     overlaysRef.current = overlays;
+    markersRef.current = createSeriesMarkers(candles);
 
     const resizeObserver = new ResizeObserver(entries => {
       const entry = entries[0];
@@ -175,6 +192,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       chartRef.current = null;
       candleSeriesRef.current = null;
       overlaysRef.current = null;
+      markersRef.current = null;
+      decorationsRef.current = { levelLines: [], zoneLines: [] };
     };
   }, []);
 
@@ -220,14 +239,73 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     apply(overlays.ema26, visible.ema, ema26Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
 
     const lookback = Math.min(55, data.length);
-    const levels = findLevels(
+    const fallbackLevels = findLevels(
       data.map(d => ({ time: String(d.time), open: d.open, high: d.high, low: d.low, close: d.close })),
       lookback,
     );
-    const supportPoints = data.map(c => ({ time: c.time as Time, value: levels.support }));
-    const resistancePoints = data.map(c => ({ time: c.time as Time, value: levels.resistance }));
-    apply(overlays.support, visible.levels, supportPoints);
-    apply(overlays.resistance, visible.levels, resistancePoints);
+    const structure = analyzeMarketStructure(
+      data.map(candle => ({
+        time: Number(candle.time),
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+      })),
+      { swingRadius: 2, levelTolerance: 0.003, confirmationBars: 3 },
+    );
+    setStructureDetail({ events: structure.events.slice(-4).reverse(), zones: structure.zones.slice(-4).reverse() });
+    const latestSupport = structure.levels.filter(level => level.kind === "support").sort((a, b) => b.createdAt - a.createdAt)[0];
+    const latestResistance = structure.levels.filter(level => level.kind === "resistance").sort((a, b) => b.createdAt - a.createdAt)[0];
+    apply(overlays.support, visible.levels, data.map(c => ({ time: c.time as Time, value: latestSupport?.price ?? fallbackLevels.support })));
+    apply(overlays.resistance, visible.levels, data.map(c => ({ time: c.time as Time, value: latestResistance?.price ?? fallbackLevels.resistance })));
+
+    const clearLines = (lines: IPriceLine[]) => lines.forEach(line => candlesSeries.removePriceLine(line));
+    clearLines(decorationsRef.current.levelLines);
+    clearLines(decorationsRef.current.zoneLines);
+    decorationsRef.current = { levelLines: [], zoneLines: [] };
+
+    if (visible.levels) {
+      decorationsRef.current.levelLines = structure.levels.slice(-6).map(level => candlesSeries.createPriceLine({
+        price: level.price,
+        color: level.kind === "support" ? "rgba(22,163,74,0.46)" : "rgba(220,38,38,0.46)",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `${level.kind === "support" ? "دعم" : "مقاومة"} ×${level.touches}`,
+      }));
+    }
+
+    if (visible.zones) {
+      decorationsRef.current.zoneLines = structure.zones.slice(-4).flatMap(zone => [
+        candlesSeries.createPriceLine({
+          price: zone.high,
+          color: zone.kind === "demand" ? "rgba(16,185,129,0.5)" : "rgba(251,113,133,0.5)",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: `${zone.kind === "demand" ? "طلب" : "عرض"} · أعلى`,
+        }),
+        candlesSeries.createPriceLine({
+          price: zone.low,
+          color: zone.kind === "demand" ? "rgba(16,185,129,0.3)" : "rgba(251,113,133,0.3)",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: false,
+        }),
+      ]);
+    }
+
+    const markers: SeriesMarker<Time>[] = visible.events
+      ? structure.events.map(event => ({
+        time: event.time as Time,
+        position: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? "belowBar" : "aboveBar",
+        color: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? "#34d399" : "#fb7185",
+        shape: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? "arrowUp" : "arrowDown",
+        text: event.kind === "bullish-breakout" ? "اختراق" : event.kind === "bearish-breakdown" ? "كسر" : "انعكاس",
+      }))
+      : [];
+    markersRef.current?.setMarkers(markers);
 
     const hasVol = volumes.some(v => v > 0);
     setHasVolume(hasVol);
@@ -271,6 +349,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                   { key: "sma", label: "SMA" },
                   { key: "ema", label: "EMA" },
                   { key: "levels", label: "دعم/مقاومة" },
+                  { key: "zones", label: "طلب/عرض" },
+                  { key: "events", label: "اختراقات" },
                   { key: "volume", label: "الحجم" },
                 ] as const
               ).map(btn => (
@@ -324,10 +404,12 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
               {visible.ema && <span className="font-mono text-sky-400/80">╌ EMA 12 ┅ EMA 26</span>}
               {visible.levels && (
                 <>
-                  <span className="font-mono text-green-500/80">┅ دعم (أدنى قاع)</span>
-                  <span className="font-mono text-red-400/80">┅ مقاومة (أعلى قمة)</span>
+                  <span className="font-mono text-green-500/80">┅ دعم بنيوي</span>
+                  <span className="font-mono text-red-400/80">┅ مقاومة بنيوية</span>
                 </>
               )}
+              {visible.zones && <span className="font-mono text-emerald-300/80">┈ مناطق طلب/عرض مؤكدة</span>}
+              {visible.events && <span className="font-mono text-violet-300/80">↑↓ اختراقات بإغلاق الشمعة</span>}
               {visible.volume && hasVolume && <span className="font-mono text-sky-300/80">▪ الحجم</span>}
               {candlesQuery.data.regularMarketPrice != null ? (
                 <span className="font-mono text-sky-300">
@@ -338,6 +420,34 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             </>
           ) : null}
         </div>
+        {(visible.events || visible.zones) && (structureDetail.events.length > 0 || structureDetail.zones.length > 0) ? (
+          <div className="mt-3 grid gap-2 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs sm:grid-cols-2">
+            {visible.events && structureDetail.events.length > 0 ? (
+              <div className="min-w-0">
+                <p className="mb-2 font-semibold text-foreground">أحداث بنية السعر</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {structureDetail.events.map(event => {
+                    const positive = event.kind === "bullish-breakout" || event.kind === "bullish-reversal";
+                    const label = event.kind === "bullish-breakout" ? "اختراق صاعد" : event.kind === "bearish-breakdown" ? "كسر هابط" : event.kind === "bullish-reversal" ? "انعكاس صاعد" : "انعكاس هابط";
+                    return <button key={event.id} type="button" onClick={() => setSelectedEventId(event.id)} aria-pressed={selectedEventId === event.id} className={`rounded-md border px-2 py-1 transition-colors ${selectedEventId === event.id ? "border-primary/50 bg-primary/15 text-primary" : positive ? "border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-200" : "border-rose-400/20 bg-rose-400/[0.06] text-rose-200"}`}>{label}</button>;
+                  })}
+                </div>
+                {(() => {
+                  const selected = structureDetail.events.find(event => event.id === selectedEventId) ?? structureDetail.events[0];
+                  return selected ? <p className="mt-2 leading-5 text-muted-foreground"><span className="font-semibold text-foreground">السبب:</span> {selected.explanation} <span className="font-mono text-primary">المستوى {selected.level.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span></p> : null;
+                })()}
+              </div>
+            ) : null}
+            {visible.zones && structureDetail.zones.length > 0 ? (
+              <div className="min-w-0">
+                <p className="mb-2 font-semibold text-foreground">مناطق قابلة للمراجعة</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {structureDetail.zones.map(zone => <span key={zone.id} className={`rounded-md border px-2 py-1 font-mono ${zone.kind === "demand" ? "border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-200" : "border-rose-400/20 bg-rose-400/[0.06] text-rose-200"}`}>{zone.kind === "demand" ? "طلب" : "عرض"} {zone.low.toLocaleString("en-US", { maximumFractionDigits: 4 })}–{zone.high.toLocaleString("en-US", { maximumFractionDigits: 4 })} · إبطال {zone.invalidation.toLocaleString("en-US", { maximumFractionDigits: 4 })}</span>)}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
