@@ -26,6 +26,9 @@ export const SUGGESTED_SYMBOLS: { symbol: string; exchange: string }[] = [
   { symbol: "TSM", exchange: "NYSE" },
   { symbol: "KO", exchange: "NYSE" },
   { symbol: "JPM", exchange: "NYSE" },
+  // معادن ثمينة (أسعار فورية مقابل الدولار)
+  { symbol: "XAUUSD", exchange: "FX" },
+  { symbol: "XAGUSD", exchange: "FX" },
   // عملات (Forex)
   { symbol: "EURUSD", exchange: "FX" },
   { symbol: "GBPUSD", exchange: "FX" },
@@ -41,6 +44,7 @@ export const SUGGESTED_EXCHANGES = ["BINANCE", "NASDAQ", "NYSE", "FX", "AMEX", "
 export const SYMBOL_GROUPS: { label: string; filter: (symbol: string) => boolean }[] = [
   { label: "العملات الرقمية", filter: symbol => symbol.endsWith("USDT") },
   { label: "الأسهم الأمريكية", filter: symbol => /^[A-Z]{1,5}$/.test(symbol) && !symbol.endsWith("USDT") },
+  { label: "المعادن", filter: symbol => /^(XAU|XAG)USD$/.test(symbol) },
   { label: "أزواج العملات", filter: symbol => /^(EUR|GBP|USD|JPY|CHF|AUD|CAD)[A-Z]{3}$/.test(symbol) },
 ];
 
