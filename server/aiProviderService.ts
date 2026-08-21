@@ -2,9 +2,10 @@ import { and, eq } from "drizzle-orm";
 import { aiProviderSettings } from "../drizzle/schema";
 import { decryptProviderKey } from "./aiProviderCrypto";
 import { getDb } from "./db";
+import { aiProviderDefinitions, type AiProviderId } from "../shared/aiProviders";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
-type ProviderName = "openai" | "anthropic" | "google";
+type ProviderName = AiProviderId;
 
 function providerError(provider: string, status: number) {
   return new Error(`تعذر الاتصال بمزود ${provider} (رمز الاستجابة ${status}). تحقق من المفتاح واسم النموذج ثم أعد المحاولة.`);
@@ -25,14 +26,18 @@ function conversationMessages(messages: ChatMessage[]) {
 }
 
 async function invokeOpenAi(apiKey: string, model: string, maxOutputTokens: number, messages: ChatMessage[]) {
+  return invokeOpenAiCompatible("https://api.openai.com/v1", "OpenAI", apiKey, model, maxOutputTokens, messages);
+}
+
+async function invokeOpenAiCompatible(baseUrl: string, providerLabel: string, apiKey: string, model: string, maxOutputTokens: number, messages: ChatMessage[]) {
   const payload = await requestJson(
-    "https://api.openai.com/v1/chat/completions",
+    `${baseUrl}/chat/completions`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model, max_tokens: maxOutputTokens, messages }),
     },
-    "OpenAI",
+    providerLabel,
   );
   const choices = payload.choices as Array<{ message?: { content?: string } }> | undefined;
   return choices?.[0]?.message?.content?.trim() || "لم يُرجع مزود OpenAI محتوى صالحًا.";
@@ -94,6 +99,10 @@ export async function invokeConfiguredProvider(messages: ChatMessage[]) {
   if (provider === "openai") content = await invokeOpenAi(apiKey, model, maxOutputTokens, messages);
   else if (provider === "anthropic") content = await invokeAnthropic(apiKey, model, maxOutputTokens, messages);
   else if (provider === "google") content = await invokeGoogle(apiKey, model, maxOutputTokens, messages);
+  else if (provider === "openrouter" || provider === "zenmux") {
+    const definition = aiProviderDefinitions[provider];
+    content = await invokeOpenAiCompatible(definition.baseUrl!, definition.name, apiKey, model, maxOutputTokens, messages);
+  }
   else throw new Error("مزود الذكاء الاصطناعي المحدد غير مدعوم.");
   return { content, provider, model };
 }

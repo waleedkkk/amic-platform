@@ -1,18 +1,14 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { aiProviderSettings } from "../../drizzle/schema";
-import { encryptProviderKey, getKeyHint } from "../aiProviderCrypto";
+import { decryptProviderKey, encryptProviderKey, getKeyHint } from "../aiProviderCrypto";
+import { verifyProviderConnection } from "../aiProviderVerifier";
 import { getDb } from "../db";
 import { adminProcedure, router } from "../_core/trpc";
 import { listTradingViewTools } from "../mcpClient";
+import { aiProviderDefinitions, aiProviderIds } from "../../shared/aiProviders";
 
-const providerSchema = z.enum(["openai", "anthropic", "google"]);
-
-const providerDefaults = {
-  openai: "gpt-4o-mini",
-  anthropic: "claude-3-5-haiku-latest",
-  google: "gemini-2.0-flash",
-} as const;
+const providerSchema = z.enum(aiProviderIds);
 
 function requireDatabase(db: Awaited<ReturnType<typeof getDb>>) {
   if (!db) throw new Error("قاعدة البيانات غير متاحة حاليًا.");
@@ -24,11 +20,11 @@ export const adminAiRouter = router({
     const db = requireDatabase(await getDb());
     const settings = await db.select().from(aiProviderSettings);
     const byProvider = new Map(settings.map(setting => [setting.provider, setting]));
-    return (Object.keys(providerDefaults) as Array<keyof typeof providerDefaults>).map(provider => {
+    return aiProviderIds.map(provider => {
       const setting = byProvider.get(provider);
       return {
         provider,
-        model: setting?.model ?? providerDefaults[provider],
+        model: setting?.model ?? aiProviderDefinitions[provider].defaultModel,
         maxOutputTokens: setting?.maxOutputTokens ?? 900,
         configured: Boolean(setting?.encryptedApiKey),
         keyHint: setting?.keyHint ?? null,
@@ -49,6 +45,10 @@ export const adminAiRouter = router({
     }
   }),
 
+  testConnection: adminProcedure
+    .input(z.object({ provider: providerSchema, model: z.string().trim().min(2).max(128), apiKey: z.string().trim().min(8).max(1_000) }))
+    .mutation(async ({ input }) => verifyProviderConnection(input)),
+
   save: adminProcedure
     .input(
       z.object({
@@ -67,6 +67,12 @@ export const adminAiRouter = router({
       const keyHint = input.apiKey ? getKeyHint(input.apiKey) : existing?.keyHint ?? null;
       if (input.enabled && !encryptedApiKey) throw new Error("أضف مفتاح API قبل تفعيل هذا المزود.");
       if (input.makeActive && !input.enabled) throw new Error("يجب تفعيل المزود قبل اختياره كمزود نشط.");
+
+      const keyToVerify = input.apiKey ?? (existing?.encryptedApiKey ? decryptProviderKey(existing.encryptedApiKey) : null);
+      if (keyToVerify && (Boolean(input.apiKey) || input.enabled || input.makeActive)) {
+        const verification = await verifyProviderConnection({ provider: input.provider, apiKey: keyToVerify, model: input.model });
+        if (!verification.valid) throw new Error(verification.message);
+      }
 
       const isActive = input.makeActive ? 1 : input.enabled ? (existing?.isActive ?? 0) : 0;
 

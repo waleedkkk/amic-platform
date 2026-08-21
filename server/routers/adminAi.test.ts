@@ -13,4 +13,10 @@ describe("adminAiRouter authorization", () => {
 
     await expect(caller.marketProviderStatus()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("يرفض اختبار مفتاح API لغير المدير قبل إجراء أي اتصال خارجي", async () => {
+    const caller = adminAiRouter.createCaller({ user: { id: 7, role: "user" } } as never);
+
+    await expect(caller.testConnection({ provider: "openai", model: "gpt-4o-mini", apiKey: "sk-test-key" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

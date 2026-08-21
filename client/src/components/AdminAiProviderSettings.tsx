@@ -5,16 +5,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Panel } from "@/components/market-ui";
 import { trpc } from "@/lib/trpc";
+import { aiProviderDefinitions, aiProviderIds, type AiProviderId } from "@shared/aiProviders";
 import { Activity, CheckCircle2, EyeOff, KeyRound, Loader2, ShieldAlert, Trash2, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 
-type Provider = "openai" | "anthropic" | "google";
+type Provider = AiProviderId;
 
-const providers: Array<{ id: Provider; name: string; subtitle: string; defaultModel: string; placeholder: string }> = [
-  { id: "openai", name: "OpenAI", subtitle: "GPT-4o وGPT-5", defaultModel: "gpt-4o-mini", placeholder: "sk-..." },
-  { id: "anthropic", name: "Anthropic", subtitle: "Claude", defaultModel: "claude-3-5-haiku-latest", placeholder: "sk-ant-..." },
-  { id: "google", name: "Google Gemini", subtitle: "Gemini", defaultModel: "gemini-2.0-flash", placeholder: "AIza..." },
-];
+const providers = aiProviderIds.map(id => ({ id, ...aiProviderDefinitions[id] }));
 
 type ProviderSetting = {
   provider: Provider;
@@ -46,6 +43,10 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
     },
     onError: error => setStatus(error.message),
   });
+  const testConnection = trpc.auth.admin.ai.testConnection.useMutation({
+    onSuccess: result => setStatus(result.message),
+    onError: error => setStatus(error.message),
+  });
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(setting.model || meta.defaultModel);
   const [maxOutputTokens, setMaxOutputTokens] = useState(String(setting.maxOutputTokens || 900));
@@ -68,6 +69,16 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
       enabled,
       makeActive,
     });
+  };
+
+  const testProviderConnection = () => {
+    const key = apiKey.trim();
+    if (!key) {
+      setStatus("أدخل مفتاح API جديدًا لاختباره؛ لا يمكن عرض المفتاح المحفوظ أو إرساله إلى المتصفح.");
+      return;
+    }
+    setStatus(null);
+    testConnection.mutate({ provider: meta.id, apiKey: key, model: model.trim() || meta.defaultModel });
   };
 
   const updatedAt = setting.updatedAt ? new Date(setting.updatedAt).toLocaleDateString("ar", { dateStyle: "medium" }) : null;
@@ -103,7 +114,7 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
             placeholder={setting.configured ? "اتركه فارغًا للإبقاء على المفتاح الحالي" : meta.placeholder}
             className="border-white/10 bg-black/15 font-mono text-sm"
           />
-          <p className="flex items-center gap-1.5 text-[11px] leading-5 text-muted-foreground"><EyeOff className="size-3.5" />لا يُعرض المفتاح ولا يمكن استعادته بعد الحفظ؛ يظهر التلميح المقنّع فقط.</p>
+          <p className="flex items-center gap-1.5 text-[11px] leading-5 text-muted-foreground"><EyeOff className="size-3.5" />لا يُعرض المفتاح ولا يمكن استعادته بعد الحفظ؛ يظهر التلميح المقنّع فقط. اختبار الاتصال لا يحفظ المفتاح.</p>
         </div>
         <div className="grid gap-2">
           <Label htmlFor={`${meta.id}-model`}>اسم النموذج الافتراضي</Label>
@@ -123,17 +134,20 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
         </div>
       </div>
 
-      {status ? <p className={`mt-3 text-xs ${status.startsWith("تم") ? "text-emerald-300" : "text-destructive"}`}>{status}</p> : null}
+      {status ? <p role="status" className={`mt-3 text-xs ${(status.startsWith("تم") || status.startsWith("نجح")) ? "text-emerald-300" : "text-destructive"}`}>{status}</p> : null}
       {updatedAt ? <p className="mt-3 text-[11px] text-muted-foreground">آخر تعديل: {updatedAt}</p> : null}
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => saveProvider(false)} disabled={save.isPending || removeKey.isPending}>
+        <Button size="sm" variant="outline" className="border-sky-400/35 text-sky-200 hover:bg-sky-400/10" onClick={testProviderConnection} disabled={testConnection.isPending || save.isPending || removeKey.isPending}>
+          {testConnection.isPending ? <Loader2 className="ml-1.5 size-4 animate-spin" /> : <Activity className="ml-1.5 size-4" />}اختبار الاتصال
+        </Button>
+        <Button size="sm" onClick={() => saveProvider(false)} disabled={save.isPending || testConnection.isPending || removeKey.isPending}>
           {save.isPending ? <Loader2 className="ml-1.5 size-4 animate-spin" /> : <KeyRound className="ml-1.5 size-4" />}حفظ الإعدادات
         </Button>
-        <Button size="sm" variant="outline" className="border-primary/35 text-primary hover:bg-primary/10" onClick={() => saveProvider(true)} disabled={!enabled || save.isPending || removeKey.isPending}>
+        <Button size="sm" variant="outline" className="border-primary/35 text-primary hover:bg-primary/10" onClick={() => saveProvider(true)} disabled={!enabled || save.isPending || testConnection.isPending || removeKey.isPending}>
           <Zap className="ml-1.5 size-4" />تعيين كمزود نشط
         </Button>
-        {setting.configured ? <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => { if (window.confirm(`حذف مفتاح ${meta.name} وتعطيله؟`)) removeKey.mutate({ provider: meta.id }); }} disabled={save.isPending || removeKey.isPending}><Trash2 className="ml-1.5 size-4" />حذف المفتاح</Button> : null}
+        {setting.configured ? <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => { if (window.confirm(`حذف مفتاح ${meta.name} وتعطيله؟`)) removeKey.mutate({ provider: meta.id }); }} disabled={save.isPending || testConnection.isPending || removeKey.isPending}><Trash2 className="ml-1.5 size-4" />حذف المفتاح</Button> : null}
       </div>
     </Panel>
   );
