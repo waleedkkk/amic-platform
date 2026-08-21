@@ -22,7 +22,7 @@ function rowsWithChange(rows: PriceRow[]) {
   });
 }
 
-const queryOpts = { refetchInterval: 300_000, refetchOnWindowFocus: false, staleTime: 240_000, retry: 2 } as const;
+const queryOpts = { refetchInterval: 300_000, refetchOnWindowFocus: false, staleTime: 280_000, retry: 1, retryDelay: 1500 } as const;
 
 function SlicePanel({ title, subtitle, rows, negative, loading, error, icon }: {
   title: string; subtitle: string; rows: PriceRow[]; negative?: boolean; loading: boolean; error: unknown; icon: React.ReactNode;
