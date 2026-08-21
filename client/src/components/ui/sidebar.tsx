@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/useMobile";
 import { cn } from "@/lib/utils";
+import { MOBILE_SIDEBAR_SURFACE_CLASS } from "@/lib/sidebarMobileSurface";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, VariantProps } from "class-variance-authority";
 import { PanelLeftIcon } from "lucide-react";
@@ -188,7 +189,10 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          className={cn(
+            `${MOBILE_SIDEBAR_SURFACE_CLASS} text-sidebar-foreground w-(--sidebar-width) border-sidebar-border p-0 [&>button]:hidden`,
+            className,
+          )}
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
