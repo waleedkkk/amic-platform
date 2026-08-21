@@ -5,6 +5,7 @@ import {
   CandlestickSeries,
   createChart,
   CrosshairMode,
+  HistogramSeries,
   IChartApi,
   ISeriesApi,
   LineSeries,
@@ -43,9 +44,66 @@ function intervalToRange(interval: ChartInterval): "1d" | "5d" | "1mo" | "6mo" |
   }
 }
 
+// ---------- Indicator math ----------
+type CandleRow = { time: string; open: number; high: number; low: number; close: number; volume?: number };
+
+function sma(values: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = [];
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= period) sum -= values[i - period];
+    out.push(i >= period - 1 ? sum / period : null);
+  }
+  return out;
+}
+
+function ema(values: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = [];
+  const k = 2 / (period + 1);
+  let prev: number | null = null;
+  for (let i = 0; i < values.length; i++) {
+    if (i === 0) {
+      prev = values[0];
+    } else {
+      prev = values[i] * k + (prev as number) * (1 - k);
+    }
+    out.push(i >= period - 1 ? prev : null);
+  }
+  return out;
+}
+
+function findLevels(candles: CandleRow[], lookback: number) {
+  // Support = lowest low in recent window; Resistance = highest high
+  const window = candles.slice(-lookback);
+  let support = Infinity;
+  let resistance = -Infinity;
+  for (const c of window) {
+    if (c.low < support) support = c.low;
+    if (c.high > resistance) resistance = c.high;
+  }
+  return { support, resistance };
+}
+
+interface OverlaySeries {
+  sma20: ISeriesApi<"Line">;
+  sma50: ISeriesApi<"Line">;
+  ema12: ISeriesApi<"Line">;
+  ema26: ISeriesApi<"Line">;
+  support: ISeriesApi<"Line">;
+  resistance: ISeriesApi<"Line">;
+  volume: ISeriesApi<"Histogram">;
+}
+
 export function CandlestickChart(props: { symbol: string; exchange: string }) {
   const { symbol, exchange } = props;
   const [interval, setInterval] = useState<ChartInterval>("1d");
+  const [visible, setVisible] = useState({
+    sma: true,
+    ema: true,
+    levels: true,
+    volume: true,
+  });
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
   const candlesQuery = trpc.market.candles.useQuery(
     { symbol, exchange, interval: interval as "60m" | "1d" | "1wk" | "1mo", range: intervalToRange(interval) },
@@ -54,7 +112,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const lineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const overlaysRef = useRef<OverlaySeries | null>(null);
+  const [hasVolume, setHasVolume] = useState(false);
 
   // Create chart once per container
   useEffect(() => {
@@ -73,16 +132,38 @@ export function CandlestickChart(props: { symbol: string; exchange: string }) {
       wickUpColor: "#16a34a",
       wickDownColor: "#dc2626",
     });
-    const line = chart.addSeries(LineSeries, {
-      color: "#38bdf8",
-      lineWidth: 1,
-      lineStyle: LineStyle.Dotted,
-      priceLineVisible: false,
-      lastValueVisible: false,
+
+    const makeLine = (color: string, width: 1 | 2 = 1, style: LineStyle = LineStyle.Solid): ISeriesApi<"Line"> =>
+      chart.addSeries(LineSeries, {
+        color,
+        lineWidth: width,
+        lineStyle: style,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+
+    const volumePanel = chart.addPane();
+    const volume = volumePanel.addSeries(HistogramSeries, {
+      color: "rgba(56,189,248,0.35)",
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume",
     });
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+
+    const overlays: OverlaySeries = {
+      sma20: makeLine("#f59e0b", 2),
+      sma50: makeLine("#a78bfa", 2),
+      ema12: makeLine("#38bdf8", 1, LineStyle.Dashed),
+      ema26: makeLine("#34d399", 1, LineStyle.Dashed),
+      support: makeLine("#16a34a", 2, LineStyle.Dotted),
+      resistance: makeLine("#dc2626", 2, LineStyle.Dotted),
+      volume,
+    };
+
     chartRef.current = chart;
     candleSeriesRef.current = candles;
-    lineSeriesRef.current = line;
+    overlaysRef.current = overlays;
+
     const resizeObserver = new ResizeObserver(entries => {
       const entry = entries[0];
       if (entry?.contentRect.width && chartRef.current) {
@@ -95,17 +176,18 @@ export function CandlestickChart(props: { symbol: string; exchange: string }) {
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
-      lineSeriesRef.current = null;
+      overlaysRef.current = null;
     };
   }, []);
 
-  // Update data whenever the query or interval changes
+  // Re-apply visibility whenever toggles or data change
   useEffect(() => {
     const data = candlesQuery.data?.candles;
     const candlesSeries = candleSeriesRef.current;
-    const lineSeries = lineSeriesRef.current;
+    const overlays = overlaysRef.current;
     const chart = chartRef.current;
-    if (!data || !data.length || !candlesSeries || !lineSeries || !chart) return;
+    if (!data || !data.length || !candlesSeries || !overlays || !chart) return;
+
     const seriesData = data.map(candle => ({
       time: candle.time as Time,
       open: candle.open,
@@ -113,28 +195,98 @@ export function CandlestickChart(props: { symbol: string; exchange: string }) {
       low: candle.low,
       close: candle.close,
     }));
-    const lineData = data.map(candle => ({ time: candle.time as Time, value: candle.close }));
     candlesSeries.setData(seriesData);
-    lineSeries.setData(lineData);
+
+    const closes = data.map(c => c.close);
+    const highs = data.map(c => c.high);
+    const lows = data.map(c => c.low);
+    const volumes = data.map(c => c.volume ?? 0);
+
+    const apply = (series: ISeriesApi<"Line"> | ISeriesApi<"Histogram">, show: boolean, points: { time: Time; value: number }[]) => {
+      if (show && points.length > 0) {
+        series.setData(points);
+        series.applyOptions({ visible: true });
+      } else {
+        series.setData([]);
+        series.applyOptions({ visible: false });
+      }
+    };
+
+    const sma20Vals = sma(closes, 20);
+    apply(overlays.sma20, visible.sma, closes.map((v, i) => sma20Vals[i]).map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
+    const sma50Vals = sma(closes, 50);
+    apply(overlays.sma50, visible.sma, sma50Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
+    const ema12Vals = ema(closes, 12);
+    apply(overlays.ema12, visible.ema, ema12Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
+    const ema26Vals = ema(closes, 26);
+    apply(overlays.ema26, visible.ema, ema26Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
+
+    const lookback = Math.min(55, data.length);
+    const levels = findLevels(
+      data.map(d => ({ time: String(d.time), open: d.open, high: d.high, low: d.low, close: d.close })),
+      lookback,
+    );
+    const supportPoints = data.map(c => ({ time: c.time as Time, value: levels.support }));
+    const resistancePoints = data.map(c => ({ time: c.time as Time, value: levels.resistance }));
+    apply(overlays.support, visible.levels, supportPoints);
+    apply(overlays.resistance, visible.levels, resistancePoints);
+
+    const hasVol = volumes.some(v => v > 0);
+    setHasVolume(hasVol);
+    if (visible.volume && hasVol) {
+      overlays.volume.setData(
+        data.map((c, i) => ({ time: c.time as Time, value: c.volume ?? 0, color: c.close >= c.open ? "rgba(22,163,74,0.45)" : "rgba(220,38,38,0.45)" })),
+      );
+      overlays.volume.applyOptions({ visible: true });
+      candlesSeries.applyOptions({ priceScaleId: "right" });
+    } else {
+      overlays.volume.setData([]);
+      overlays.volume.applyOptions({ visible: false });
+    }
+
     chart.timeScale().fitContent();
-  }, [stableKey, candlesQuery.data]);
+  }, [stableKey, candlesQuery.data, visible]);
+
+  const toggle = (key: keyof typeof visible) => setVisible(v => ({ ...v, [key]: !v[key] }));
 
   return (
     <Card className="bg-white/[0.02]">
       <CardContent className="pt-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-semibold tracking-[0.13em] text-primary">PRICE HISTORY</p>
-          <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5">
-            {candleIntervals.map(item => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setInterval(item)}
-                className={`rounded-md px-2.5 py-1 text-xs font-mono transition-colors duration-150 ${interval === item ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                {displayLabel[item] ?? item}
-              </button>
-            ))}
+          <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5">
+              {candleIntervals.map(item => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setInterval(item)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-mono transition-colors duration-150 ${interval === item ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {displayLabel[item] ?? item}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5">
+              {(
+                [
+                  { key: "sma", label: "SMA" },
+                  { key: "ema", label: "EMA" },
+                  { key: "levels", label: "دعم/مقاومة" },
+                  { key: "volume", label: "الحجم" },
+                ] as const
+              ).map(btn => (
+                <button
+                  key={btn.key}
+                  type="button"
+                  onClick={() => toggle(btn.key)}
+                  aria-pressed={visible[btn.key]}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-150 ${visible[btn.key] ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="relative min-h-[220px]">
@@ -164,6 +316,15 @@ export function CandlestickChart(props: { symbol: string; exchange: string }) {
                 {candlesQuery.data.candles.length} شمعة · {candlesQuery.data.interval} ·{" "}
                 {candlesQuery.data.exchangeName}
               </span>
+              {visible.sma && <span className="font-mono text-amber-400/80">━ SMA 20 ━ SMA 50</span>}
+              {visible.ema && <span className="font-mono text-sky-400/80">╌ EMA 12 ┅ EMA 26</span>}
+              {visible.levels && (
+                <>
+                  <span className="font-mono text-green-500/80">┅ دعم (أدنى قاع)</span>
+                  <span className="font-mono text-red-400/80">┅ مقاومة (أعلى قمة)</span>
+                </>
+              )}
+              {visible.volume && hasVolume && <span className="font-mono text-sky-300/80">▪ الحجم</span>}
               {candlesQuery.data.regularMarketPrice != null ? (
                 <span className="font-mono text-sky-300">
                   السعر الحالي: {candlesQuery.data.regularMarketPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}
