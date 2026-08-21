@@ -34,4 +34,31 @@ describe("toPreciousMetalQuote", () => {
     expect(quote.price).toBe(28.5);
     expect(quote.changePercent).toBeNull();
   });
+
+  it("يُعيد نقاطًا ساعية حقيقية للمخطط المصغر وينهيها بالسعر المعروض", () => {
+    const quote = toPreciousMetalQuote(
+      { symbol: "XAUUSD", label: "الذهب", shortLabel: "XAU", precision: 2 },
+      {
+        symbol: "GC=F", yahooSymbol: "GC=F", interval: "1d", currency: "USD", exchangeName: "CMX",
+        regularMarketPrice: 2410,
+        fetchedAt: "2026-08-21T00:00:00.000Z",
+        candles: [
+          { time: 1, open: 2380, high: 2390, low: 2375, close: 2385, volume: 0 },
+          { time: 2, open: 2390, high: 2415, low: 2385, close: 2400, volume: 0 },
+        ],
+      },
+      {
+        symbol: "GC=F", yahooSymbol: "GC=F", interval: "60m", currency: "USD", exchangeName: "CMX",
+        regularMarketPrice: 2408,
+        fetchedAt: "2026-08-21T00:00:00.000Z",
+        candles: [
+          { time: 1, open: 2390, high: 2394, low: 2389, close: 2392, volume: 10 },
+          { time: 2, open: 2392, high: 2401, low: 2391, close: 2398, volume: 20 },
+          { time: 3, open: 2398, high: 2409, low: 2397, close: 2408, volume: 30 },
+        ],
+      },
+    );
+
+    expect(quote.sparklinePrices).toEqual([2392, 2398, 2410]);
+  });
 });

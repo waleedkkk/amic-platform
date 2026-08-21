@@ -41,6 +41,7 @@ export type PreciousMetalQuote = {
   shortLabel: string;
   price: number;
   changePercent: number | null;
+  sparklinePrices: number[];
   currency: string;
   precision: number;
 };
@@ -48,6 +49,7 @@ export type PreciousMetalQuote = {
 export function toPreciousMetalQuote(
   metal: (typeof PRECIOUS_METALS)[number],
   history: CandleHistory,
+  intradayHistory?: CandleHistory,
 ): PreciousMetalQuote {
   const latest = history.candles.at(-1);
   const previous = history.candles.at(-2);
@@ -56,6 +58,14 @@ export function toPreciousMetalQuote(
   const changePercent = previous?.close && Number.isFinite(previous.close)
     ? ((price - previous.close) / previous.close) * 100
     : null;
+  const intradayPrices = (intradayHistory?.candles ?? [])
+    .map(candle => candle.close)
+    .filter(Number.isFinite)
+    .slice(-24);
+  // اجعل آخر نقطة مطابقة للسعر المعروض عندما يكون السعر اللحظي أحدث من آخر شمعة ساعة.
+  const sparklinePrices = intradayPrices.length
+    ? [...intradayPrices.slice(0, -1), price]
+    : [];
 
   return {
     symbol: metal.symbol,
@@ -63,6 +73,7 @@ export function toPreciousMetalQuote(
     shortLabel: metal.shortLabel,
     price,
     changePercent: Number.isFinite(changePercent) ? changePercent : null,
+    sparklinePrices,
     currency: history.currency || "USD",
     precision: metal.precision,
   };
@@ -70,9 +81,13 @@ export function toPreciousMetalQuote(
 
 async function fetchPreciousMetals() {
   const results = await Promise.allSettled(
-    PRECIOUS_METALS.map(async metal =>
-      toPreciousMetalQuote(metal, await getCandleHistoryCached(metal.yahooSymbol, "OZ", "1d", "5d")),
-    ),
+    PRECIOUS_METALS.map(async metal => {
+      const [dailyHistory, intradayHistory] = await Promise.all([
+        getCandleHistoryCached(metal.yahooSymbol, "OZ", "1d", "5d"),
+        getCandleHistoryCached(metal.yahooSymbol, "OZ", "60m", "1d"),
+      ]);
+      return toPreciousMetalQuote(metal, dailyHistory, intradayHistory);
+    }),
   );
   const items = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
   if (!items.length) throw new Error("تعذّر جلب أسعار المعادن الثمينة من مزود السوق");
@@ -105,7 +120,7 @@ export const marketRouter = router({
   availableTools: protectedProcedure.query(() => listTradingViewTools()),
 
   preciousMetals: publicProcedure.query(() =>
-    cached("widget:precious-metals:1D", "metals", "OZ", "1D", 60, fetchPreciousMetals),
+    cached("widget:precious-metals:v2:1D", "metals", "OZ", "1D", 60, fetchPreciousMetals),
   ),
 
   overviewSlice: publicProcedure

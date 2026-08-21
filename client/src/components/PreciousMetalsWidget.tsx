@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/market-ui";
+import { Sparkline } from "@/components/Sparkline";
 import { trpc } from "@/lib/trpc";
 import { Activity, ArrowDownRight, ArrowUpRight, Gem, RefreshCw } from "lucide-react";
 import { Link } from "wouter";
@@ -10,6 +11,7 @@ type MetalQuote = {
   shortLabel: string;
   price: number;
   changePercent: number | null;
+  sparklinePrices: number[];
   currency: string;
   precision: number;
 };
@@ -60,7 +62,10 @@ export function PreciousMetalsWidget() {
               <div><p className="font-medium">{item.label}</p><p className="mt-0.5 text-[11px] tracking-wide text-muted-foreground">{item.symbol} · {item.shortLabel}</p></div>
               {typeof item.changePercent === "number" ? <span className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-xs font-medium ${isPositive ? "bg-emerald-400/10 text-emerald-300" : "bg-rose-400/10 text-rose-300"}`}>{isPositive ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}{Math.abs(item.changePercent).toLocaleString("ar", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span> : <span className="text-xs text-muted-foreground">—</span>}
             </div>
-            <div className="mt-4 flex items-end justify-between gap-2"><p className="text-xl font-semibold tracking-tight sm:text-2xl">{priceLabel(item)}</p><p className="pb-0.5 text-xs text-muted-foreground">{item.currency} / أوقية</p></div>
+            <div className="mt-4 flex items-end justify-between gap-3">
+              <div className="min-w-0"><p className="text-xl font-semibold tracking-tight sm:text-2xl">{priceLabel(item)}</p><p className="mt-1 text-xs text-muted-foreground">{item.currency} / أوقية</p></div>
+              <div className="flex shrink-0 flex-col items-end gap-1"><Sparkline values={item.sparklinePrices ?? []} label={item.label} /><span className="text-[10px] font-medium text-muted-foreground">حركة اليوم</span></div>
+            </div>
           </Link>;
         })}
       </div>
