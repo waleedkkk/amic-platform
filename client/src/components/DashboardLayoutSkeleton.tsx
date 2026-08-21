@@ -4,7 +4,7 @@ export function DashboardLayoutSkeleton() {
   return (
     <div className="flex min-h-screen bg-background">
       {/* Sidebar skeleton */}
-      <div className="w-[280px] border-r border-border bg-background p-4 space-y-6">
+      <div className="relative w-[280px] border-l border-border bg-background p-4 space-y-6">
         {/* Logo area */}
         <div className="flex items-center gap-3 px-2">
           <Skeleton className="h-8 w-8 rounded-md" />
@@ -19,7 +19,7 @@ export function DashboardLayoutSkeleton() {
         </div>
 
         {/* User profile area at bottom */}
-        <div className="absolute bottom-4 left-4 right-4">
+        <div className="absolute bottom-4 start-4 end-4">
           <div className="flex items-center gap-3 px-1">
             <Skeleton className="h-9 w-9 rounded-full" />
             <div className="flex-1 space-y-2">
