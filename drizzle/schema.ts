@@ -175,6 +175,12 @@ export const userTelegramSettings = mysqlTable(
   },
 );
 
+export const chartPreferences = mysqlTable("chartPreferences", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  layers: json("layers").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const metalAlertMonitorSettings = mysqlTable("metalAlertMonitorSettings", {
   id: int("id").primaryKey(),
   scheduleTaskUid: varchar("scheduleTaskUid", { length: 65 }).unique(),
@@ -191,3 +197,4 @@ export type InsertSavedSignal = typeof savedSignals.$inferInsert;
 export type AiProviderSetting = typeof aiProviderSettings.$inferSelect;
 export type MetalAlert = typeof metalAlerts.$inferSelect;
 export type UserNotification = typeof userNotifications.$inferSelect;
+export type ChartPreferences = typeof chartPreferences.$inferSelect;

@@ -4,6 +4,7 @@ import { trpc } from "@/lib/trpc";
 import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } from "@shared/movingAverageCrossover";
 import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStructure";
 import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
+import { DEFAULT_CHART_LAYERS, normalizeChartLayers, type ChartLayerPreferences } from "@shared/chartPreferences";
 import {
   CandlestickSeries,
   createSeriesMarkers,
@@ -102,14 +103,9 @@ type StructureDecorations = {
 export function CandlestickChart(props: { symbol: string; exchange: string; onCrossoverChange?: (crossover: MovingAverageCrossover | null, interval: ChartInterval) => void }) {
   const { symbol, exchange, onCrossoverChange } = props;
   const [interval, setInterval] = useState<ChartInterval>("1d");
-  const [visible, setVisible] = useState({
-    sma: true,
-    ema: true,
-    levels: true,
-    zones: true,
-    events: true,
-    volume: true,
-  });
+  const [visible, setVisible] = useState<ChartLayerPreferences>(DEFAULT_CHART_LAYERS);
+  const chartPreferencesQuery = trpc.market.chartPreferences.get.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
+  const saveChartPreferences = trpc.market.chartPreferences.save.useMutation();
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
   const liveStreamUrl = useMemo(() => getBinanceKlineStream(symbol, exchange, interval), [symbol, exchange, interval]);
   const [liveCandle, setLiveCandle] = useState<LiveChartCandle | null>(null);
@@ -133,6 +129,12 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const [hasVolume, setHasVolume] = useState(false);
   const [structureDetail, setStructureDetail] = useState<Pick<MarketStructure, "events" | "zones">>({ events: [], zones: [] });
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (chartPreferencesQuery.data?.layers) {
+      setVisible(normalizeChartLayers(chartPreferencesQuery.data.layers));
+    }
+  }, [chartPreferencesQuery.data?.layers]);
 
   useEffect(() => {
     onCrossoverChange?.(latestCrossover, interval);
@@ -357,7 +359,11 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     chart.timeScale().fitContent();
   }, [stableKey, chartCandles, visible]);
 
-  const toggle = (key: keyof typeof visible) => setVisible(v => ({ ...v, [key]: !v[key] }));
+  const toggle = (key: keyof ChartLayerPreferences) => {
+    const next = { ...visible, [key]: !visible[key] };
+    setVisible(next);
+    saveChartPreferences.mutate({ layers: next });
+  };
 
   return (
     <Card className="bg-white/[0.02]">
@@ -399,6 +405,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                 </button>
               ))}
             </div>
+            <span className="self-center text-[10px] text-muted-foreground">
+              {chartPreferencesQuery.isLoading ? "تحميل الطبقات…" : saveChartPreferences.isPending ? "حفظ الطبقات…" : "تفضيلاتك محفوظة"}
+            </span>
           </div>
         </div>
         <div className="relative min-h-[220px]">

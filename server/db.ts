@@ -3,6 +3,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertSavedSignal,
+  chartPreferences,
   InsertUser,
   marketSnapshots,
   metalAlertMonitorSettings,
@@ -243,6 +244,18 @@ export async function saveUserTelegramSettings(userId: number, input: { enabled:
   if (input.enabled && !chatId) throw new Error("أدخل معرّف محادثة تيليغرام قبل التفعيل.");
   await db.insert(userTelegramSettings).values({ userId, chatId, enabled: input.enabled ? 1 : 0 }).onDuplicateKeyUpdate({ set: { chatId, enabled: input.enabled ? 1 : 0, updatedAt: new Date() } });
   return { enabled: input.enabled, chatId };
+}
+
+export async function getUserChartPreferences(userId: number) {
+  const db = await requireDb();
+  const [preferences] = await db.select().from(chartPreferences).where(eq(chartPreferences.userId, userId)).limit(1);
+  return preferences;
+}
+
+export async function saveUserChartPreferences(userId: number, layers: Record<string, boolean>) {
+  const db = await requireDb();
+  await db.insert(chartPreferences).values({ userId, layers }).onDuplicateKeyUpdate({ set: { layers, updatedAt: new Date() } });
+  return { layers };
 }
 
 export async function listActiveMetalAlerts() {

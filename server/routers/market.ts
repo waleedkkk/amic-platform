@@ -1,13 +1,22 @@
 import { z } from "zod";
 import { getCandleHistoryCached, type CandleHistory, type CandleInterval } from "../candles";
-import { getMarketSnapshot, saveMarketSnapshot } from "../db";
+import { getMarketSnapshot, getUserChartPreferences, saveMarketSnapshot, saveUserChartPreferences } from "../db";
 import { callTradingViewTool, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { DEFAULT_CHART_LAYERS, normalizeChartLayers } from "../../shared/chartPreferences";
 
 const timeframe = z.enum(["5m", "15m", "1h", "4h", "1D", "1W", "1M"]);
 const candleInterval = z.enum(["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"]);
 const candleRange = z.enum(["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"]);
 const sparklineRange = z.enum(["day", "week"]);
+const chartLayers = z.object({
+  sma: z.boolean(),
+  ema: z.boolean(),
+  levels: z.boolean(),
+  zones: z.boolean(),
+  events: z.boolean(),
+  volume: z.boolean(),
+});
 export type SparklineRange = z.infer<typeof sparklineRange>;
 
 function intervalToRange(interval: CandleInterval): string {
@@ -215,4 +224,14 @@ export const marketRouter = router({
     .query(({ input }) =>
       getCandleHistoryCached(input.symbol, input.exchange, input.interval, input.range ?? intervalToRange(input.interval)),
     ),
+
+  chartPreferences: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const preferences = await getUserChartPreferences(ctx.user.id);
+      return { layers: normalizeChartLayers(preferences?.layers ?? DEFAULT_CHART_LAYERS) };
+    }),
+    save: protectedProcedure
+      .input(z.object({ layers: chartLayers }))
+      .mutation(({ ctx, input }) => saveUserChartPreferences(ctx.user.id, input.layers)),
+  }),
 });
