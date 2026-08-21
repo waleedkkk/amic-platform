@@ -1,12 +1,16 @@
 import Decimal from "decimal.js";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertSavedSignal,
   InsertUser,
   marketSnapshots,
+  metalAlertMonitorSettings,
+  metalAlerts,
   paperTrades,
   savedSignals,
+  userNotifications,
+  userTelegramSettings,
   users,
   watchlists,
 } from "../drizzle/schema";
@@ -184,4 +188,90 @@ export async function saveMarketSnapshot(input: {
 export async function listUserWatchlist(userId: number) {
   const db = await requireDb();
   return db.select().from(watchlists).where(eq(watchlists.userId, userId)).orderBy(desc(watchlists.createdAt));
+}
+
+export type MetalAlertInput = {
+  metal: "XAUUSD" | "XAGUSD";
+  direction: "above" | "below";
+  targetPrice: string;
+};
+
+export async function listUserMetalAlerts(userId: number) {
+  const db = await requireDb();
+  return db.select().from(metalAlerts).where(eq(metalAlerts.userId, userId)).orderBy(desc(metalAlerts.createdAt));
+}
+
+export async function createUserMetalAlert(userId: number, input: MetalAlertInput) {
+  const db = await requireDb();
+  const targetPrice = new Decimal(input.targetPrice);
+  if (!targetPrice.isFinite() || targetPrice.lte(0)) throw new Error("سعر التنبيه يجب أن يكون رقمًا موجبًا.");
+  const result = await db.insert(metalAlerts).values({
+    userId,
+    metal: input.metal,
+    direction: input.direction,
+    targetPrice: targetPrice.toFixed(4),
+  });
+  return { id: Number(result[0].insertId) };
+}
+
+export async function cancelUserMetalAlert(userId: number, alertId: number) {
+  const db = await requireDb();
+  await db.update(metalAlerts).set({ status: "cancelled" }).where(and(eq(metalAlerts.id, alertId), eq(metalAlerts.userId, userId), eq(metalAlerts.status, "active")));
+  return { success: true } as const;
+}
+
+export async function listUserNotifications(userId: number) {
+  const db = await requireDb();
+  return db.select().from(userNotifications).where(eq(userNotifications.userId, userId)).orderBy(desc(userNotifications.createdAt)).limit(20);
+}
+
+export async function markUserNotificationRead(userId: number, notificationId: number) {
+  const db = await requireDb();
+  await db.update(userNotifications).set({ readAt: new Date() }).where(and(eq(userNotifications.id, notificationId), eq(userNotifications.userId, userId), isNull(userNotifications.readAt)));
+  return { success: true } as const;
+}
+
+export async function getUserTelegramSettings(userId: number) {
+  const db = await requireDb();
+  const [settings] = await db.select().from(userTelegramSettings).where(eq(userTelegramSettings.userId, userId)).limit(1);
+  return settings;
+}
+
+export async function saveUserTelegramSettings(userId: number, input: { enabled: boolean; chatId?: string | null }) {
+  const db = await requireDb();
+  const chatId = input.chatId?.trim() || null;
+  if (input.enabled && !chatId) throw new Error("أدخل معرّف محادثة تيليغرام قبل التفعيل.");
+  await db.insert(userTelegramSettings).values({ userId, chatId, enabled: input.enabled ? 1 : 0 }).onDuplicateKeyUpdate({ set: { chatId, enabled: input.enabled ? 1 : 0, updatedAt: new Date() } });
+  return { enabled: input.enabled, chatId };
+}
+
+export async function listActiveMetalAlerts() {
+  const db = await requireDb();
+  return db
+    .select({ alert: metalAlerts, telegram: userTelegramSettings })
+    .from(metalAlerts)
+    .leftJoin(userTelegramSettings, eq(metalAlerts.userId, userTelegramSettings.userId))
+    .where(eq(metalAlerts.status, "active"));
+}
+
+export async function markMetalAlertTriggered(alertId: number, price: string) {
+  const db = await requireDb();
+  const result = await db.update(metalAlerts).set({ status: "triggered", triggeredPrice: price, triggeredAt: new Date() }).where(and(eq(metalAlerts.id, alertId), eq(metalAlerts.status, "active")));
+  return Number(result[0].affectedRows) > 0;
+}
+
+export async function createMetalAlertNotification(input: { userId: number; title: string; content: string; metadata: { alertId: number; metal: "XAUUSD" | "XAGUSD"; direction: "above" | "below"; targetPrice: string; triggeredPrice: string } }) {
+  const db = await requireDb();
+  await db.insert(userNotifications).values({ ...input, category: "metal_alert" });
+}
+
+export async function saveMetalAlertMonitorTaskUid(scheduleTaskUid: string) {
+  const db = await requireDb();
+  await db.insert(metalAlertMonitorSettings).values({ id: 1, scheduleTaskUid }).onDuplicateKeyUpdate({ set: { scheduleTaskUid, updatedAt: new Date() } });
+}
+
+export async function getMetalAlertMonitorTaskUid() {
+  const db = await requireDb();
+  const [settings] = await db.select().from(metalAlertMonitorSettings).where(eq(metalAlertMonitorSettings.id, 1)).limit(1);
+  return settings?.scheduleTaskUid ?? null;
 }

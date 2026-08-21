@@ -7,6 +7,8 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 const timeframe = z.enum(["5m", "15m", "1h", "4h", "1D", "1W", "1M"]);
 const candleInterval = z.enum(["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"]);
 const candleRange = z.enum(["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"]);
+const sparklineRange = z.enum(["day", "week"]);
+export type SparklineRange = z.infer<typeof sparklineRange>;
 
 function intervalToRange(interval: CandleInterval): string {
   switch (interval) {
@@ -42,6 +44,7 @@ export type PreciousMetalQuote = {
   price: number;
   changePercent: number | null;
   sparklinePrices: number[];
+  sparklineRange: SparklineRange;
   currency: string;
   precision: number;
 };
@@ -50,6 +53,7 @@ export function toPreciousMetalQuote(
   metal: (typeof PRECIOUS_METALS)[number],
   history: CandleHistory,
   intradayHistory?: CandleHistory,
+  range: SparklineRange = "day",
 ): PreciousMetalQuote {
   const latest = history.candles.at(-1);
   const previous = history.candles.at(-2);
@@ -58,13 +62,13 @@ export function toPreciousMetalQuote(
   const changePercent = previous?.close && Number.isFinite(previous.close)
     ? ((price - previous.close) / previous.close) * 100
     : null;
-  const intradayPrices = (intradayHistory?.candles ?? [])
+  const sourcePrices = (intradayHistory?.candles ?? [])
     .map(candle => candle.close)
     .filter(Number.isFinite)
-    .slice(-24);
-  // اجعل آخر نقطة مطابقة للسعر المعروض عندما يكون السعر اللحظي أحدث من آخر شمعة ساعة.
-  const sparklinePrices = intradayPrices.length
-    ? [...intradayPrices.slice(0, -1), price]
+    .slice(range === "day" ? -24 : -7);
+  // اجعل آخر نقطة مطابقة للسعر المعروض عندما يكون السعر اللحظي أحدث من آخر شمعة.
+  const sparklinePrices = sourcePrices.length
+    ? [...sourcePrices.slice(0, -1), price]
     : [];
 
   return {
@@ -74,19 +78,22 @@ export function toPreciousMetalQuote(
     price,
     changePercent: Number.isFinite(changePercent) ? changePercent : null,
     sparklinePrices,
+    sparklineRange: range,
     currency: history.currency || "USD",
     precision: metal.precision,
   };
 }
 
-async function fetchPreciousMetals() {
+async function fetchPreciousMetals(range: SparklineRange) {
   const results = await Promise.allSettled(
     PRECIOUS_METALS.map(async metal => {
-      const [dailyHistory, intradayHistory] = await Promise.all([
+      const [dailyHistory, sparklineHistory] = await Promise.all([
         getCandleHistoryCached(metal.yahooSymbol, "OZ", "1d", "5d"),
-        getCandleHistoryCached(metal.yahooSymbol, "OZ", "60m", "1d"),
+        range === "day"
+          ? getCandleHistoryCached(metal.yahooSymbol, "OZ", "60m", "1d")
+          : getCandleHistoryCached(metal.yahooSymbol, "OZ", "1d", "1mo"),
       ]);
-      return toPreciousMetalQuote(metal, dailyHistory, intradayHistory);
+      return toPreciousMetalQuote(metal, dailyHistory, sparklineHistory, range);
     }),
   );
   const items = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
@@ -119,9 +126,12 @@ async function cached<T>(
 export const marketRouter = router({
   availableTools: protectedProcedure.query(() => listTradingViewTools()),
 
-  preciousMetals: publicProcedure.query(() =>
-    cached("widget:precious-metals:v2:1D", "metals", "OZ", "1D", 60, fetchPreciousMetals),
-  ),
+  preciousMetals: publicProcedure
+    .input(z.object({ range: sparklineRange.optional() }).optional())
+    .query(({ input }) => {
+      const range = input?.range ?? "day";
+      return cached(`widget:precious-metals:v3:${range}`, "metals", "OZ", range, 60, () => fetchPreciousMetals(range));
+    }),
 
   overviewSlice: publicProcedure
     .input(z.enum(["cryptoGainers", "cryptoLosers", "stockGainers", "stockLosers", "globalSnapshot"]))

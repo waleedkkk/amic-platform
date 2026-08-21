@@ -15,6 +15,7 @@ import { getDb } from "./db";
 import { aiRouter } from "./routers/ai";
 import { adminAiRouter } from "./routers/adminAi";
 import { marketRouter } from "./routers/market";
+import { metalAlertsRouter } from "./routers/metalAlerts";
 import { paperTradingRouter } from "./routers/paperTrading";
 import { signalsRouter } from "./routers/signals";
 
@@ -71,6 +72,7 @@ export const appRouter = router({
     }),
   }),
   market: marketRouter,
+  metalAlerts: metalAlertsRouter,
   paperTrading: paperTradingRouter,
   signals: signalsRouter,
   ai: aiRouter,

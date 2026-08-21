@@ -50,6 +50,20 @@
       "when": 1787310751963,
       "tag": "0006_windy_blindfold",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787315876325,
+      "tag": "0007_warm_baron_strucker",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1787315981392,
+      "tag": "0008_wealthy_tony_stark",
+      "breakpoints": true
     }
   ]
 }

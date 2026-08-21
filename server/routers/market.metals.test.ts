@@ -60,5 +60,19 @@ describe("toPreciousMetalQuote", () => {
     );
 
     expect(quote.sparklinePrices).toEqual([2392, 2398, 2410]);
+    expect(quote.sparklineRange).toBe("day");
+  });
+
+  it("يقتصر مخطط الأسبوع على آخر سبع إغلاقات يومية وينهيه بالسعر الحالي", () => {
+    const candles = Array.from({ length: 10 }, (_, index) => ({ time: index + 1, open: 2300 + index, high: 2310 + index, low: 2290 + index, close: 2300 + index, volume: 1 }));
+    const quote = toPreciousMetalQuote(
+      { symbol: "XAUUSD", label: "الذهب", shortLabel: "XAU", precision: 2 },
+      { symbol: "GC=F", yahooSymbol: "GC=F", interval: "1d", currency: "USD", exchangeName: "CMX", regularMarketPrice: 2410, fetchedAt: "2026-08-21T00:00:00.000Z", candles: candles.slice(-2) },
+      { symbol: "GC=F", yahooSymbol: "GC=F", interval: "1d", currency: "USD", exchangeName: "CMX", regularMarketPrice: 2409, fetchedAt: "2026-08-21T00:00:00.000Z", candles },
+      "week",
+    );
+
+    expect(quote.sparklinePrices).toEqual([2303, 2304, 2305, 2306, 2307, 2308, 2410]);
+    expect(quote.sparklineRange).toBe("week");
   });
 });

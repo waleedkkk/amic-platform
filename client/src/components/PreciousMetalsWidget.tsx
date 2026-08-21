@@ -1,8 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/market-ui";
+import { MetalDetailDialog } from "@/components/MetalDetailDialog";
 import { Sparkline } from "@/components/Sparkline";
 import { trpc } from "@/lib/trpc";
 import { Activity, ArrowDownRight, ArrowUpRight, Gem, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 
 type MetalQuote = {
@@ -12,6 +14,7 @@ type MetalQuote = {
   price: number;
   changePercent: number | null;
   sparklinePrices: number[];
+  sparklineRange: "day" | "week";
   currency: string;
   precision: number;
 };
@@ -24,7 +27,10 @@ function priceLabel(item: MetalQuote) {
 }
 
 export function PreciousMetalsWidget() {
-  const query = trpc.market.preciousMetals.useQuery(undefined, {
+  const [range, setRange] = useState<"day" | "week">("day");
+  const [selectedMetal, setSelectedMetal] = useState<MetalQuote | null>(null);
+  const queryInput = useMemo(() => ({ range }), [range]);
+  const query = trpc.market.preciousMetals.useQuery(queryInput, {
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     staleTime: 55_000,
@@ -46,9 +52,7 @@ export function PreciousMetalsWidget() {
           <p className="mt-1 text-xs text-muted-foreground">عقود الذهب والفضة بالدولار لكل أوقية، وتحديث تلقائي كل دقيقة.</p>
         </div>
       </div>
-      <Button size="icon" variant="ghost" className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => query.refetch()} disabled={query.isFetching} aria-label="تحديث أسعار المعادن">
-        <RefreshCw className={`size-4 ${query.isFetching ? "animate-spin" : ""}`} />
-      </Button>
+      <div className="flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-black/10 p-0.5"><button type="button" onClick={() => setRange("day")} aria-pressed={range === "day"} className={`min-h-9 rounded-md px-2 text-xs font-medium transition-colors ${range === "day" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}>اليوم</button><button type="button" onClick={() => setRange("week")} aria-pressed={range === "week"} className={`min-h-9 rounded-md px-2 text-xs font-medium transition-colors ${range === "week" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}>الأسبوع</button><Button size="icon" variant="ghost" className="size-9 text-muted-foreground hover:text-foreground" onClick={() => query.refetch()} disabled={query.isFetching} aria-label="تحديث أسعار المعادن"><RefreshCw className={`size-4 ${query.isFetching ? "animate-spin" : ""}`} /></Button></div>
     </div>
 
     {query.isLoading ? <div className="mt-5 grid grid-cols-2 gap-3" aria-label="جارٍ تحميل أسعار المعادن">
@@ -57,19 +61,20 @@ export function PreciousMetalsWidget() {
       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2" aria-live="polite">
         {data.items.map(item => {
           const isPositive = typeof item.changePercent === "number" && item.changePercent >= 0;
-          return <Link key={item.symbol} href="/analysis" className="group rounded-xl border border-white/[0.08] bg-black/10 p-3.5 transition-colors hover:border-amber-300/25 hover:bg-amber-300/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          return <button key={item.symbol} type="button" onClick={() => setSelectedMetal(item)} className="group w-full rounded-xl border border-white/[0.08] bg-black/10 p-3.5 text-right transition-colors hover:border-amber-300/25 hover:bg-amber-300/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             <div className="flex items-start justify-between gap-3">
               <div><p className="font-medium">{item.label}</p><p className="mt-0.5 text-[11px] tracking-wide text-muted-foreground">{item.symbol} · {item.shortLabel}</p></div>
               {typeof item.changePercent === "number" ? <span className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-xs font-medium ${isPositive ? "bg-emerald-400/10 text-emerald-300" : "bg-rose-400/10 text-rose-300"}`}>{isPositive ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}{Math.abs(item.changePercent).toLocaleString("ar", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span> : <span className="text-xs text-muted-foreground">—</span>}
             </div>
             <div className="mt-4 flex items-end justify-between gap-3">
               <div className="min-w-0"><p className="text-xl font-semibold tracking-tight sm:text-2xl">{priceLabel(item)}</p><p className="mt-1 text-xs text-muted-foreground">{item.currency} / أوقية</p></div>
-              <div className="flex shrink-0 flex-col items-end gap-1"><Sparkline values={item.sparklinePrices ?? []} label={item.label} /><span className="text-[10px] font-medium text-muted-foreground">حركة اليوم</span></div>
+              <div className="flex shrink-0 flex-col items-end gap-1"><Sparkline values={item.sparklinePrices ?? []} label={`${item.label} — ${range === "day" ? "حركة اليوم" : "حركة الأسبوع"}`} /><span className="text-[10px] font-medium text-muted-foreground">{range === "day" ? "حركة اليوم" : "حركة الأسبوع"}</span></div>
             </div>
-          </Link>;
+          </button>;
         })}
       </div>
       <div className="mt-4 flex items-center justify-between gap-3 text-[11px] text-muted-foreground"><span className="inline-flex items-center gap-1"><Activity className="size-3.5 text-primary" />{fetchedAt ? `آخر تحديث ${fetchedAt}` : "بيانات السوق"}</span><Link href="/analysis" className="font-medium text-primary hover:underline">فتح التحليل</Link></div>
     </>}
+    <MetalDetailDialog item={selectedMetal} open={Boolean(selectedMetal)} onOpenChange={open => { if (!open) setSelectedMetal(null); }} />
   </Panel>;
 }

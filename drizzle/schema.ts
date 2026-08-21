@@ -128,6 +128,60 @@ export const aiProviderSettings = mysqlTable(
   }),
 );
 
+export const metalAlerts = mysqlTable(
+  "metalAlerts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    metal: mysqlEnum("metal", ["XAUUSD", "XAGUSD"]).notNull(),
+    direction: mysqlEnum("direction", ["above", "below"]).notNull(),
+    targetPrice: decimal("targetPrice", { precision: 18, scale: 4 }).notNull(),
+    status: mysqlEnum("status", ["active", "triggered", "cancelled"]).default("active").notNull(),
+    triggeredPrice: decimal("triggeredPrice", { precision: 18, scale: 4 }),
+    triggeredAt: timestamp("triggeredAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userStatusLookup: index("metal_alerts_user_status_idx").on(table.userId, table.status),
+    monitorLookup: index("metal_alerts_monitor_idx").on(table.status, table.metal),
+  }),
+);
+
+export const userNotifications = mysqlTable(
+  "userNotifications",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    category: mysqlEnum("category", ["metal_alert"]).notNull(),
+    title: varchar("title", { length: 180 }).notNull(),
+    content: text("content").notNull(),
+    metadata: json("metadata").notNull(),
+    readAt: timestamp("readAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userReadLookup: index("user_notifications_user_read_idx").on(table.userId, table.readAt, table.createdAt),
+  }),
+);
+
+export const userTelegramSettings = mysqlTable(
+  "userTelegramSettings",
+  {
+    userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+    chatId: varchar("chatId", { length: 64 }),
+    enabled: int("enabled").default(0).notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+);
+
+export const metalAlertMonitorSettings = mysqlTable("metalAlertMonitorSettings", {
+  id: int("id").primaryKey(),
+  scheduleTaskUid: varchar("scheduleTaskUid", { length: 65 }).unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type PaperTrade = typeof paperTrades.$inferSelect;
@@ -135,3 +189,5 @@ export type InsertPaperTrade = typeof paperTrades.$inferInsert;
 export type SavedSignal = typeof savedSignals.$inferSelect;
 export type InsertSavedSignal = typeof savedSignals.$inferInsert;
 export type AiProviderSetting = typeof aiProviderSettings.$inferSelect;
+export type MetalAlert = typeof metalAlerts.$inferSelect;
+export type UserNotification = typeof userNotifications.$inferSelect;
