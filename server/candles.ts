@@ -60,7 +60,7 @@ export function tvSymbolToYahoo(symbol: string, exchange: string): string {
     }
     case "BINANCE": {
       // BTCUSDT / BTCUSD -> BTC-USD
-      const base = symbol.toUpperCase().replace(/USDT$/, "").replace(/$/, "");
+      const base = symbol.toUpperCase().replace(/USDT$/, "").replace(/USD$/, "");
       return `${base}-USD`;
     }
     default:

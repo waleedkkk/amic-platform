@@ -97,7 +97,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
   const candlesQuery = trpc.market.candles.useQuery(
     { symbol, exchange, interval: interval as "60m" | "1d" | "1wk" | "1mo", range: intervalToRange(interval) },
-    { refetchOnWindowFocus: false, enabled: Boolean(symbol) && Boolean(exchange) },
+    { refetchOnWindowFocus: true, refetchInterval: 60_000, enabled: Boolean(symbol) && Boolean(exchange) },
   );
   const latestCrossover = useMemo(
     () => findLatestSmaCrossover(candlesQuery.data?.candles ?? []),

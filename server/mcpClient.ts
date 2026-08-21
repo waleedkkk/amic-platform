@@ -116,20 +116,60 @@ function decodeResult(result: unknown) {
   }
 }
 
-async function withMcpClient<T>(handler: (client: Client) => Promise<T>): Promise<T> {
+type McpConnection = { client: Client; transport: StreamableHTTPClientTransport };
+let activeConnection: McpConnection | null = null;
+let connecting: Promise<McpConnection> | null = null;
+
+function withTimeout<T>(operation: Promise<T>, context: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${context} تجاوز مهلة ${MCP_TIMEOUT_MS / 1000} ثانية`)), MCP_TIMEOUT_MS);
+    operation.then(
+      value => { clearTimeout(timer); resolve(value); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+async function createConnection(): Promise<McpConnection> {
   const client = new Client(
     { name: "amic-market-bridge", version: "1.0.0" },
     { capabilities: {} },
   );
-  const transport = new StreamableHTTPClientTransport(new URL(MCP_URL), {
-    requestInit: { signal: AbortSignal.timeout(MCP_TIMEOUT_MS) },
-  });
+  const transport = new StreamableHTTPClientTransport(new URL(MCP_URL));
+  await withTimeout(client.connect(transport), "اتصال TradingView MCP");
+  return { client, transport };
+}
 
-  await client.connect(transport);
+async function getConnection(): Promise<McpConnection> {
+  if (activeConnection) return activeConnection;
+  if (!connecting) {
+    connecting = createConnection().then(connection => {
+      activeConnection = connection;
+      return connection;
+    }).finally(() => { connecting = null; });
+  }
+  return connecting;
+}
+
+async function invalidateConnection(connection: McpConnection) {
+  if (activeConnection !== connection) return;
+  activeConnection = null;
+  await connection.transport.close().catch(() => undefined);
+}
+
+export async function closeTradingViewMcpConnection() {
+  if (activeConnection) await invalidateConnection(activeConnection);
+}
+
+async function withMcpClient<T>(handler: (client: Client) => Promise<T>): Promise<T> {
+  let connection: McpConnection;
   try {
-    return await handler(client);
-  } finally {
-    await transport.close();
+    connection = await getConnection();
+    return await withTimeout(handler(connection.client), "طلب TradingView MCP");
+  } catch (cause) {
+    if (connection!) await invalidateConnection(connection);
+    const reason = cause instanceof Error ? cause.message : "فشل غير معروف";
+    throw new Error(`تعذر تنفيذ طلب TradingView MCP: ${reason}. تحقق من جاهزية مزود التحليل أو بنية استجابته.`);
   }
 }
 

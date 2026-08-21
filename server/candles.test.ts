@@ -22,6 +22,7 @@ describe("tvSymbolToYahoo mapping", () => {
 
   it("maps Binance crypto to Yahoo crypto format", () => {
     expect(tvSymbolToYahoo("BTCUSDT", "BINANCE")).toBe("BTC-USD");
+    expect(tvSymbolToYahoo("BTCUSD", "BINANCE")).toBe("BTC-USD");
     expect(tvSymbolToYahoo("ETHUSDT", "BINANCE")).toBe("ETH-USD");
   });
 });
