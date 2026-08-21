@@ -1,0 +1,1 @@
+ALTER TABLE `aiProviderSettings` ADD `maxOutputTokens` int DEFAULT 900 NOT NULL;

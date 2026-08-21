@@ -5,7 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AuthScreen } from "./AuthScreen";
 import { useIsMobile } from "@/hooks/useMobile";
-import { Bot, CandlestickChart, ChartNoAxesCombined, LayoutDashboard, LogOut, PanelLeft, ScanSearch, Sparkles, WalletCards } from "lucide-react";
+import { Bot, CandlestickChart, ChartNoAxesCombined, LayoutDashboard, LogOut, PanelLeft, ScanSearch, ShieldCheck, Sparkles, WalletCards } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
@@ -44,7 +44,8 @@ function LayoutContent({ children, setSidebarWidth }: { children: React.ReactNod
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const collapsed = state === "collapsed";
-  const active = menuItems.find(item => item.path === location);
+  const visibleMenuItems = user?.role === "admin" ? [...menuItems, { icon: ShieldCheck, label: "مركز الإدارة", path: "/admin" }] : menuItems;
+  const active = visibleMenuItems.find(item => item.path === location);
   useEffect(() => {
     const move = (event: MouseEvent) => { if (!isResizing) return; const left = sidebarRef.current?.getBoundingClientRect().left ?? 0; const width = event.clientX - left; if (width >= MIN_WIDTH && width <= MAX_WIDTH) setSidebarWidth(width); };
     const end = () => setIsResizing(false);
@@ -55,7 +56,7 @@ function LayoutContent({ children, setSidebarWidth }: { children: React.ReactNod
     <div className="relative" ref={sidebarRef}>
       <Sidebar collapsible="icon" className="border-l border-white/[0.07] bg-[#0c141e]" disableTransition={isResizing}>
         <SidebarHeader className="h-[76px] justify-center px-3"><div className="flex w-full items-center gap-3"><button onClick={toggleSidebar} className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-muted-foreground transition-colors hover:bg-white/[0.07]" aria-label="طي القائمة"><PanelLeft className="size-4" /></button>{!collapsed && <div className="min-w-0"><p className="text-base font-semibold tracking-tight">AMIC</p><p className="text-[10px] tracking-[0.15em] text-primary">MARKET INTELLIGENCE</p></div>}</div></SidebarHeader>
-        <SidebarContent className="px-2 pt-2"><p className="mb-2 px-3 text-[10px] font-semibold tracking-[0.14em] text-muted-foreground group-data-[collapsible=icon]:hidden">مساحة العمل</p><SidebarMenu>{menuItems.map(item => <SidebarMenuItem key={item.path}><SidebarMenuButton isActive={location === item.path} onClick={() => setLocation(item.path)} tooltip={item.label} className="h-11 rounded-xl text-[13px] font-medium data-[active=true]:bg-primary/12 data-[active=true]:text-primary"><item.icon className="size-[18px]" /><span>{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></SidebarContent>
+        <SidebarContent className="px-2 pt-2"><p className="mb-2 px-3 text-[10px] font-semibold tracking-[0.14em] text-muted-foreground group-data-[collapsible=icon]:hidden">مساحة العمل</p><SidebarMenu>{visibleMenuItems.map(item => <SidebarMenuItem key={item.path}><SidebarMenuButton isActive={location === item.path} onClick={() => setLocation(item.path)} tooltip={item.label} className="h-11 rounded-xl text-[13px] font-medium data-[active=true]:bg-primary/12 data-[active=true]:text-primary"><item.icon className="size-[18px]" /><span>{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></SidebarContent>
         <SidebarFooter className="p-3"><div className="mb-3 rounded-xl border border-primary/15 bg-primary/[0.045] p-3 group-data-[collapsible=icon]:hidden"><p className="text-xs font-medium text-primary">قراءة مسؤولة</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">المعلومات تحليلية وتعليمية، وليست توصية استثمارية.</p></div><DropdownMenu><DropdownMenuTrigger asChild><button className="flex w-full items-center gap-3 rounded-xl p-2 text-right transition-colors hover:bg-white/[0.05] group-data-[collapsible=icon]:justify-center"><Avatar className="size-8 border border-white/10"><AvatarFallback className="bg-secondary text-xs">{user?.name?.charAt(0).toUpperCase() ?? "U"}</AvatarFallback></Avatar><div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden"><p className="truncate text-xs font-medium">{user?.name || "مستخدم AMIC"}</p><p className="mt-0.5 truncate text-[10px] text-muted-foreground" dir="ltr">{user?.email ?? ""}</p></div></button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-48"><DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive focus:text-destructive"><LogOut className="ml-2 size-4" />تسجيل الخروج</DropdownMenuItem></DropdownMenuContent></DropdownMenu></SidebarFooter>
       </Sidebar>
       <div onMouseDown={() => !collapsed && setIsResizing(true)} className={cnResize(collapsed)} />

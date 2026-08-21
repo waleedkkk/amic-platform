@@ -106,9 +106,31 @@ export const marketSnapshots = mysqlTable(
   }),
 );
 
+export const aiProviderSettings = mysqlTable(
+  "aiProviderSettings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    encryptedApiKey: text("encryptedApiKey"),
+    keyHint: varchar("keyHint", { length: 16 }),
+    model: varchar("model", { length: 128 }).notNull(),
+    maxOutputTokens: int("maxOutputTokens").default(900).notNull(),
+    enabled: int("enabled").default(0).notNull(),
+    isActive: int("isActive").default(0).notNull(),
+    updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    providerUnique: uniqueIndex("ai_provider_settings_provider_uq").on(table.provider),
+    activeLookup: index("ai_provider_settings_active_idx").on(table.isActive, table.enabled),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type PaperTrade = typeof paperTrades.$inferSelect;
 export type InsertPaperTrade = typeof paperTrades.$inferInsert;
 export type SavedSignal = typeof savedSignals.$inferSelect;
 export type InsertSavedSignal = typeof savedSignals.$inferInsert;
+export type AiProviderSetting = typeof aiProviderSettings.$inferSelect;
