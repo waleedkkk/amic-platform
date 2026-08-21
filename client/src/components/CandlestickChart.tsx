@@ -3,6 +3,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { trpc } from "@/lib/trpc";
 import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } from "@shared/movingAverageCrossover";
 import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStructure";
+import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
 import {
   CandlestickSeries,
   createSeriesMarkers,
@@ -21,9 +22,9 @@ import {
 } from "lightweight-charts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const candleIntervals = ["60m", "1d", "1wk", "1mo"] as const;
+const candleIntervals = ["1m", "5m", "15m", "60m", "1d", "1wk", "1mo"] as const;
 type ChartInterval = (typeof candleIntervals)[number];
-const displayLabel: Record<string, string> = { "60m": "1h", "1d": "1d", "1wk": "1w", "1mo": "1M" };
+const displayLabel: Record<string, string> = { "1m": "1m", "5m": "5m", "15m": "15m", "60m": "1h", "1d": "1d", "1wk": "1w", "1mo": "1M" };
 
 const chartTheme: DeepPartial<import("lightweight-charts").ChartOptions> = {
   layout: {
@@ -42,6 +43,9 @@ const chartTheme: DeepPartial<import("lightweight-charts").ChartOptions> = {
 
 function intervalToRange(interval: ChartInterval): "1d" | "5d" | "1mo" | "6mo" | "2y" | "5y" {
   switch (interval) {
+    case "1m": return "1d";
+    case "5m":
+    case "15m": return "5d";
     case "60m": return "5d";
     case "1d": return "6mo";
     case "1wk": return "2y";
@@ -51,7 +55,7 @@ function intervalToRange(interval: ChartInterval): "1d" | "5d" | "1mo" | "6mo" |
 }
 
 // ---------- Indicator math ----------
-type CandleRow = { time: string; open: number; high: number; low: number; close: number; volume?: number };
+type CandleRow = LiveChartCandle;
 
 function ema(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = [];
@@ -107,13 +111,18 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     volume: true,
   });
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
+  const liveStreamUrl = useMemo(() => getBinanceKlineStream(symbol, exchange, interval), [symbol, exchange, interval]);
+  const [liveCandle, setLiveCandle] = useState<LiveChartCandle | null>(null);
+  const [liveStatus, setLiveStatus] = useState<"live" | "connecting" | "reconnecting" | "delayed">("delayed");
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const candlesQuery = trpc.market.candles.useQuery(
     { symbol, exchange, interval: interval as "60m" | "1d" | "1wk" | "1mo", range: intervalToRange(interval) },
-    { refetchOnWindowFocus: true, refetchInterval: 60_000, enabled: Boolean(symbol) && Boolean(exchange) },
+    { refetchOnWindowFocus: true, refetchInterval: interval === "1m" || interval === "5m" ? 30_000 : interval === "15m" || interval === "60m" ? 60_000 : 5 * 60_000, enabled: Boolean(symbol) && Boolean(exchange) },
   );
+  const chartCandles = useMemo(() => mergeLiveCandle(candlesQuery.data?.candles ?? [], liveCandle), [candlesQuery.data?.candles, liveCandle]);
   const latestCrossover = useMemo(
-    () => findLatestSmaCrossover(candlesQuery.data?.candles ?? []),
-    [candlesQuery.data?.candles],
+    () => findLatestSmaCrossover(chartCandles),
+    [chartCandles],
   );
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -128,6 +137,34 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   useEffect(() => {
     onCrossoverChange?.(latestCrossover, interval);
   }, [interval, latestCrossover, onCrossoverChange]);
+
+  useEffect(() => {
+    setLiveCandle(null);
+    if (!liveStreamUrl) {
+      setLiveStatus("delayed");
+      return;
+    }
+    let disposed = false;
+    let retryTimer: number | undefined;
+    setLiveStatus(reconnectAttempt ? "reconnecting" : "connecting");
+    const socket = new WebSocket(liveStreamUrl);
+    socket.onopen = () => { if (!disposed) setLiveStatus("live"); };
+    socket.onmessage = event => {
+      const candle = parseBinanceKlineMessage(event.data);
+      if (candle && !disposed) setLiveCandle(candle);
+    };
+    socket.onclose = () => {
+      if (disposed) return;
+      setLiveStatus("reconnecting");
+      retryTimer = window.setTimeout(() => setReconnectAttempt(value => value + 1), 2_500);
+    };
+    socket.onerror = () => socket.close();
+    return () => {
+      disposed = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
+      socket.close();
+    };
+  }, [liveStreamUrl, reconnectAttempt]);
 
   // Create chart once per container
   useEffect(() => {
@@ -199,7 +236,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
 
   // Re-apply visibility whenever toggles or data change
   useEffect(() => {
-    const data = candlesQuery.data?.candles;
+    const data = chartCandles;
     const candlesSeries = candleSeriesRef.current;
     const overlays = overlaysRef.current;
     const chart = chartRef.current;
@@ -239,10 +276,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     apply(overlays.ema26, visible.ema, ema26Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
 
     const lookback = Math.min(55, data.length);
-    const fallbackLevels = findLevels(
-      data.map(d => ({ time: String(d.time), open: d.open, high: d.high, low: d.low, close: d.close })),
-      lookback,
-    );
+    const fallbackLevels = findLevels(data, lookback);
     const structure = analyzeMarketStructure(
       data.map(candle => ({
         time: Number(candle.time),
@@ -321,7 +355,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     }
 
     chart.timeScale().fitContent();
-  }, [stableKey, candlesQuery.data, visible]);
+  }, [stableKey, chartCandles, visible]);
 
   const toggle = (key: keyof typeof visible) => setVisible(v => ({ ...v, [key]: !v[key] }));
 
@@ -331,7 +365,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <p className="text-xs font-semibold tracking-[0.13em] text-primary">PRICE HISTORY</p>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-1">
-            <div className="grid grid-cols-5 gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5 sm:flex sm:items-center">
+            <div className="grid grid-cols-4 gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5 sm:flex sm:items-center">
               {candleIntervals.map(item => (
                 <button
                   key={item}
@@ -397,8 +431,11 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
           {candlesQuery.data ? (
             <>
               <span className="font-mono">
-                {candlesQuery.data.candles.length} شمعة · {candlesQuery.data.interval} ·{" "}
+                {chartCandles.length} شمعة · {candlesQuery.data.interval} ·{" "}
                 {candlesQuery.data.exchangeName}
+              </span>
+              <span className={liveStatus === "live" ? "font-mono text-emerald-300" : "font-mono text-amber-300"}>
+                {liveStatus === "live" ? "● حي · Binance" : liveStatus === "connecting" || liveStatus === "reconnecting" ? "◌ جارٍ وصل البث" : "◌ بيانات مؤجلة وفق الإطار"}
               </span>
               {visible.sma && <span className="font-mono text-amber-400/80">━ SMA 20 ━ SMA 50</span>}
               {visible.ema && <span className="font-mono text-sky-400/80">╌ EMA 12 ┅ EMA 26</span>}

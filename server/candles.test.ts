@@ -5,7 +5,7 @@ vi.mock("./db", () => ({
   saveMarketSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { tvSymbolToYahoo, fetchCandleHistory } = await import("./candles");
+const { candleCacheTtlMs, tvSymbolToYahoo, fetchCandleHistory } = await import("./candles");
 
 describe("tvSymbolToYahoo mapping", () => {
   it("maps US equity symbols unchanged", () => {
@@ -24,6 +24,14 @@ describe("tvSymbolToYahoo mapping", () => {
     expect(tvSymbolToYahoo("BTCUSDT", "BINANCE")).toBe("BTC-USD");
     expect(tvSymbolToYahoo("BTCUSD", "BINANCE")).toBe("BTC-USD");
     expect(tvSymbolToYahoo("ETHUSDT", "BINANCE")).toBe("ETH-USD");
+  });
+});
+
+describe("سياسة تحديث الشموع", () => {
+  it("تقلل TTL للفواصل القصيرة وتبقي الإطار العالي محميًا من كثرة الطلبات", () => {
+    expect(candleCacheTtlMs("1m")).toBe(30_000);
+    expect(candleCacheTtlMs("60m")).toBe(60_000);
+    expect(candleCacheTtlMs("1d")).toBe(5 * 60 * 1000);
   });
 });
 

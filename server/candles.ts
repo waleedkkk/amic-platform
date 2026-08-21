@@ -46,6 +46,13 @@ export type CandleHistory = {
 const CHART_TIMEOUT_MS = 25_000;
 const CHART_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
+/** فواصل الشموع القصيرة تُحدّث بسرعة مضبوطة؛ البث المباشر للعملات لا يمر بهذا المسار. */
+export function candleCacheTtlMs(interval: CandleInterval): number {
+  if (interval === "1m" || interval === "5m") return 30_000;
+  if (interval === "15m" || interval === "30m" || interval === "60m") return 60_000;
+  return 5 * 60 * 1000;
+}
+
 export function tvSymbolToYahoo(symbol: string, exchange: string): string {
   switch (exchange.toUpperCase()) {
     case "NASDAQ":
@@ -189,14 +196,14 @@ export async function getCandleHistoryCached(
   if (existing) return existing as CandleHistory;
 
   const history = await fetchCandleHistory(symbol, exchange, interval, range);
-  // Cache the latest price briefly; the historical series is cached longer.
+  // Public provider: short intervals get a bounded, lower TTL; higher periods remain cached longer.
   await saveMarketSnapshot({
     cacheKey,
     market: "candles",
     exchange,
     timeframe: `${interval}:${range}`,
     payload: history,
-    expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    expiresAt: new Date(Date.now() + candleCacheTtlMs(interval)),
   });
   return history;
 }
