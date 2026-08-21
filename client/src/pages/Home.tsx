@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { DataTable, EmptyAction, formatValue, MetricCard, PageHeading, Panel } from "@/components/market-ui";
+import { PreciousMetalsWidget } from "@/components/PreciousMetalsWidget";
 import { trpc } from "@/lib/trpc";
 import { Activity, ArrowDownRight, ArrowUpRight, BarChart3, Bot, ScanSearch, TrendingDown, TrendingUp } from "lucide-react";
 import { Link } from "wouter";
@@ -65,6 +66,7 @@ export default function Home() {
   return <>
     <PageHeading eyebrow="LIVE MARKET DESK" title="نبضة السوق" description="نظرة عملية على الحركة النسبية عبر الكريبتو والأسهم وأسواق العملات، مع تحديث تلقائي للبيانات المتاحة." action={<div className="flex gap-2"><Button asChild variant="outline" className="bg-white/[0.03]"><Link href="/screener">ماسح السوق <ScanSearch className="mr-2 size-4" /></Link></Button><Button asChild><Link href="/analysis">بدء تحليل <ArrowUpRight className="mr-2 size-4" /></Link></Button></div>} />
     {allFailed ? <div className="rounded-lg border border-white/10 bg-white/[0.03] px-6 py-10 text-center text-sm text-muted-foreground">تعذّر الوصول إلى مزود بيانات السوق حاليًا — تحقق من اتصالك ثم أعد تحميل الصفحة.</div> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="رابحو الكريبتو" value={formatValue(toMarketRows(queries[0].query.data).length, 0)} detail="نتائج متاحة على BINANCE" positive icon={<TrendingUp className="size-4 text-emerald-300" />} /><MetricCard label="خاسرو الكريبتو" value={formatValue(toMarketRows(queries[1].query.data).length, 0)} detail="نتائج متاحة على BINANCE" positive={false} icon={<TrendingDown className="size-4 text-rose-300" />} /><MetricCard label="حركة المؤشرات" value={formatValue(indices.length, 0)} detail="مؤشرات عالمية نشطة" icon={<BarChart3 className="size-4 text-sky-300" />} /><MetricCard label="لقطة العملات" value={eurRate?.price ? formatValue(eurRate.price, 4) : "—"} detail={eurRate?.price ? `EUR/USD من ملخص السوق العالمي` : "من ملخص السوق العالمي"} icon={<Activity className="size-4 text-amber-300" />} /></div>}
+    <div className="mt-6"><PreciousMetalsWidget /></div>
     {anyLoading && !anyData ? <div className="mt-6 flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground"><Activity className="size-4 animate-spin" /> جارٍ جلب بيانات السوق…</div> : null}
     <div className="mt-6 grid gap-4 xl:grid-cols-2">
       {queries.map(({ key, title, subtitle, negative, icon, query }) => (
