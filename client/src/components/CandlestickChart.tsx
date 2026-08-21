@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { trpc } from "@/lib/trpc";
+import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } from "@shared/movingAverageCrossover";
 import {
   CandlestickSeries,
   createChart,
@@ -47,17 +48,6 @@ function intervalToRange(interval: ChartInterval): "1d" | "5d" | "1mo" | "6mo" |
 // ---------- Indicator math ----------
 type CandleRow = { time: string; open: number; high: number; low: number; close: number; volume?: number };
 
-function sma(values: number[], period: number): (number | null)[] {
-  const out: (number | null)[] = [];
-  let sum = 0;
-  for (let i = 0; i < values.length; i++) {
-    sum += values[i];
-    if (i >= period) sum -= values[i - period];
-    out.push(i >= period - 1 ? sum / period : null);
-  }
-  return out;
-}
-
 function ema(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = [];
   const k = 2 / (period + 1);
@@ -95,8 +85,8 @@ interface OverlaySeries {
   volume: ISeriesApi<"Histogram">;
 }
 
-export function CandlestickChart(props: { symbol: string; exchange: string }) {
-  const { symbol, exchange } = props;
+export function CandlestickChart(props: { symbol: string; exchange: string; onCrossoverChange?: (crossover: MovingAverageCrossover | null, interval: ChartInterval) => void }) {
+  const { symbol, exchange, onCrossoverChange } = props;
   const [interval, setInterval] = useState<ChartInterval>("1d");
   const [visible, setVisible] = useState({
     sma: true,
@@ -109,11 +99,19 @@ export function CandlestickChart(props: { symbol: string; exchange: string }) {
     { symbol, exchange, interval: interval as "60m" | "1d" | "1wk" | "1mo", range: intervalToRange(interval) },
     { refetchOnWindowFocus: false, enabled: Boolean(symbol) && Boolean(exchange) },
   );
+  const latestCrossover = useMemo(
+    () => findLatestSmaCrossover(candlesQuery.data?.candles ?? []),
+    [candlesQuery.data?.candles],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const overlaysRef = useRef<OverlaySeries | null>(null);
   const [hasVolume, setHasVolume] = useState(false);
+
+  useEffect(() => {
+    onCrossoverChange?.(latestCrossover, interval);
+  }, [interval, latestCrossover, onCrossoverChange]);
 
   // Create chart once per container
   useEffect(() => {
@@ -212,9 +210,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string }) {
       }
     };
 
-    const sma20Vals = sma(closes, 20);
+    const sma20Vals = calculateSma(closes, 20);
     apply(overlays.sma20, visible.sma, closes.map((v, i) => sma20Vals[i]).map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
-    const sma50Vals = sma(closes, 50);
+    const sma50Vals = calculateSma(closes, 50);
     apply(overlays.sma50, visible.sma, sma50Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
     const ema12Vals = ema(closes, 12);
     apply(overlays.ema12, visible.ema, ema12Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
@@ -309,6 +307,12 @@ export function CandlestickChart(props: { symbol: string; exchange: string }) {
             </div>
           )}
         </div>
+        {latestCrossover ? (
+          <div className={`mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-xs ${latestCrossover.kind === "golden" ? "border-emerald-400/25 bg-emerald-400/[0.07] text-emerald-200" : "border-rose-400/25 bg-rose-400/[0.07] text-rose-200"}`}>
+            <span className="font-semibold">{latestCrossover.kind === "golden" ? "التقاطع الذهبي" : "تقاطع الموت"} <span className="font-normal opacity-80">— SMA 20 / SMA 50</span></span>
+            <span className="font-mono opacity-80">سعر التقاطع: {latestCrossover.price.toLocaleString("en-US", { maximumFractionDigits: 6 })} · قبل {latestCrossover.barsSince} شموع</span>
+          </div>
+        ) : null}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
           {candlesQuery.data ? (
             <>
