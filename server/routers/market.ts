@@ -55,6 +55,18 @@ async function cached<T>(
 export const marketRouter = router({
   availableTools: protectedProcedure.query(() => listTradingViewTools()),
 
+  overviewSlice: publicProcedure
+    .input(z.enum(["cryptoGainers", "cryptoLosers", "stockGainers", "stockLosers", "globalSnapshot"]))
+    .query(({ input }) =>
+      cached(`overview:${input}:1D`, "global", "MULTI", "1D", 300, () => {
+        if (input === "cryptoGainers") return callTradingViewTool("top_gainers", { exchange: "BINANCE", timeframe: "1D", limit: 6 });
+        if (input === "cryptoLosers") return callTradingViewTool("top_losers", { exchange: "BINANCE", timeframe: "1D", limit: 6 });
+        if (input === "stockGainers") return callTradingViewTool("top_gainers", { exchange: "NASDAQ", timeframe: "1D", limit: 6 });
+        if (input === "stockLosers") return callTradingViewTool("top_losers", { exchange: "NASDAQ", timeframe: "1D", limit: 6 });
+        return callTradingViewTool("market_snapshot", {});
+      }),
+    ),
+
   overview: publicProcedure.query(async () =>
     cached("overview:global:1D", "global", "MULTI", "1D", 60, async () => {
       const [cryptoGainers, cryptoLosers, stockGainers, stockLosers, globalSnapshot] = await Promise.all([
