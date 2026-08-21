@@ -3,6 +3,7 @@ import { aiProviderSettings } from "../drizzle/schema";
 import { decryptProviderKey } from "./aiProviderCrypto";
 import { getDb } from "./db";
 import { aiProviderDefinitions, type AiProviderId } from "../shared/aiProviders";
+import { resolveOpenAiBaseUrl } from "./aiProviderBaseUrl";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 type ProviderName = AiProviderId;
@@ -96,12 +97,16 @@ export async function invokeConfiguredProvider(messages: ChatMessage[]) {
   const model = setting.model;
   const maxOutputTokens = setting.maxOutputTokens;
   let content: string;
-  if (provider === "openai") content = await invokeOpenAi(apiKey, model, maxOutputTokens, messages);
+  if (provider === "openai") {
+    content = setting.customBaseUrl
+      ? await invokeOpenAiCompatible(resolveOpenAiBaseUrl(provider, setting.customBaseUrl), "OpenAI-compatible", apiKey, model, maxOutputTokens, messages)
+      : await invokeOpenAi(apiKey, model, maxOutputTokens, messages);
+  }
   else if (provider === "anthropic") content = await invokeAnthropic(apiKey, model, maxOutputTokens, messages);
   else if (provider === "google") content = await invokeGoogle(apiKey, model, maxOutputTokens, messages);
   else if (provider === "openrouter" || provider === "zenmux") {
     const definition = aiProviderDefinitions[provider];
-    content = await invokeOpenAiCompatible(definition.baseUrl!, definition.name, apiKey, model, maxOutputTokens, messages);
+    content = await invokeOpenAiCompatible(resolveOpenAiBaseUrl(provider, setting.customBaseUrl), definition.name, apiKey, model, maxOutputTokens, messages);
   }
   else throw new Error("مزود الذكاء الاصطناعي المحدد غير مدعوم.");
   return { content, provider, model };

@@ -1,4 +1,5 @@
 import { aiProviderDefinitions, type AiProviderId } from "../shared/aiProviders";
+import { normalizeCustomBaseUrl, resolveOpenAiBaseUrl } from "./aiProviderBaseUrl";
 
 export type AiProviderName = AiProviderId;
 
@@ -42,7 +43,7 @@ function normalizeModels(items: unknown[], mapItem: (item: Record<string, unknow
   return unique.sort((left, right) => left.label.localeCompare(right.label)).slice(0, 500);
 }
 
-function buildModelListRequest(provider: AiProviderName, apiKey: string): { url: string; init: RequestInit } {
+function buildModelListRequest(provider: AiProviderName, apiKey: string, customBaseUrl?: string | null): { url: string; init: RequestInit } {
   const definition = aiProviderDefinitions[provider];
   if (provider === "anthropic") {
     return {
@@ -56,16 +57,14 @@ function buildModelListRequest(provider: AiProviderName, apiKey: string): { url:
       init: { headers: { "x-goog-api-key": apiKey } } satisfies RequestInit,
     };
   }
-  if (provider === "openai") {
+  if (definition.protocol === "openai") {
+    const baseUrl = resolveOpenAiBaseUrl(provider, customBaseUrl);
     return {
-      url: "https://api.openai.com/v1/models",
+      url: `${baseUrl}/models`,
       init: { headers: { Authorization: `Bearer ${apiKey}` } } satisfies RequestInit,
     };
   }
-  return {
-    url: `${definition.baseUrl}/models`,
-    init: { headers: { Authorization: `Bearer ${apiKey}` } } satisfies RequestInit,
-  };
+  throw new Error("تعذر تحديد واجهة كتالوج النماذج لهذا المزود.");
 }
 
 function safeCatalogFailureMessage(provider: AiProviderName, status: number) {
@@ -81,11 +80,11 @@ function safeCatalogFailureMessage(provider: AiProviderName, status: number) {
  * المزود كاملة، ولا يضع المفتاح في الرابط أو سجل الواجهة.
  */
 export async function listProviderModels(
-  input: { provider: AiProviderName; apiKey: string },
+  input: { provider: AiProviderName; apiKey: string; customBaseUrl?: string | null },
   fetcher: FetchLike = fetch,
 ): Promise<ProviderModelListResult> {
-  const request = buildModelListRequest(input.provider, input.apiKey);
   try {
+    const request = buildModelListRequest(input.provider, input.apiKey, input.customBaseUrl);
     const response = await fetcher(request.url, request.init);
     if (!response.ok) return { success: false, message: safeCatalogFailureMessage(input.provider, response.status) };
     const payload = response.json ? await response.json() : null;
@@ -109,33 +108,18 @@ export async function listProviderModels(
     });
     if (!models.length) return { success: false, message: `لم يُرجع ${aiProviderDefinitions[input.provider].name} نماذج محادثة قابلة للاختيار.` };
     return { success: true, models };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("عنوان API")) return { success: false, message: error.message };
     return { success: false, message: `تعذر الوصول إلى كتالوج نماذج ${aiProviderDefinitions[input.provider].name}. تحقق من الشبكة ثم أعد المحاولة.` };
   }
 }
 
-function buildVerificationRequest(provider: AiProviderName, apiKey: string, model: string) {
+function buildVerificationRequest(provider: AiProviderName, apiKey: string, model: string, customBaseUrl?: string | null) {
   const normalizedModel = model.replace(/^models\//, "");
   const safeModel = normalizedModel.split("/").map(encodeURIComponent).join("/");
   const definition = aiProviderDefinitions[provider];
 
-  if (provider === "openai") {
-    const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-    return {
-      url: `https://api.openai.com/v1/models/${safeModel}`,
-      init: { headers } satisfies RequestInit,
-    };
-  }
-
-  if (provider === "anthropic") {
-    const headers: Record<string, string> = { "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
-    return {
-      url: `https://api.anthropic.com/v1/models/${safeModel}`,
-      init: { headers } satisfies RequestInit,
-    };
-  }
-
-  if (provider === "openrouter") {
+  if (provider === "openrouter" && !normalizeCustomBaseUrl(provider, customBaseUrl)) {
     const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
     return {
       url: `${definition.baseUrl}/key`,
@@ -144,9 +128,18 @@ function buildVerificationRequest(provider: AiProviderName, apiKey: string, mode
   }
 
   if (definition.protocol === "openai") {
+    const baseUrl = resolveOpenAiBaseUrl(provider, customBaseUrl);
     const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
     return {
-      url: `${definition.baseUrl}/models/${safeModel}`,
+      url: `${baseUrl}/models/${safeModel}`,
+      init: { headers } satisfies RequestInit,
+    };
+  }
+
+  if (provider === "anthropic") {
+    const headers: Record<string, string> = { "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+    return {
+      url: `https://api.anthropic.com/v1/models/${safeModel}`,
       init: { headers } satisfies RequestInit,
     };
   }
@@ -172,11 +165,11 @@ function safeFailureMessage(provider: AiProviderName, status: number) {
  * ولا يعيد المفتاح أو نص الاستجابة أو أي ترويسات في النتيجة.
  */
 export async function verifyProviderConnection(
-  input: { provider: AiProviderName; apiKey: string; model: string },
+  input: { provider: AiProviderName; apiKey: string; model: string; customBaseUrl?: string | null },
   fetcher: FetchLike = fetch,
 ): Promise<ProviderConnectionResult> {
-  const request = buildVerificationRequest(input.provider, input.apiKey, input.model);
   try {
+    const request = buildVerificationRequest(input.provider, input.apiKey, input.model, input.customBaseUrl);
     const response = await fetcher(request.url, request.init);
     if (response.ok) {
       const message = input.provider === "openrouter"
@@ -185,7 +178,8 @@ export async function verifyProviderConnection(
       return { valid: true, message };
     }
     return { valid: false, message: safeFailureMessage(input.provider, response.status) };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("عنوان API")) return { valid: false, message: error.message };
     return { valid: false, message: `تعذر الوصول إلى ${aiProviderDefinitions[input.provider].name} أثناء الاختبار. تحقق من الشبكة ثم أعد المحاولة.` };
   }
 }

@@ -7,6 +7,7 @@ import { getDb } from "../db";
 import { adminProcedure, router } from "../_core/trpc";
 import { listTradingViewTools } from "../mcpClient";
 import { aiProviderDefinitions, aiProviderIds } from "../../shared/aiProviders";
+import { validateCustomBaseUrl } from "../aiProviderBaseUrl";
 
 const providerSchema = z.enum(aiProviderIds);
 
@@ -25,6 +26,7 @@ export const adminAiRouter = router({
       return {
         provider,
         model: setting?.model ?? aiProviderDefinitions[provider].defaultModel,
+        customBaseUrl: setting?.customBaseUrl ?? null,
         maxOutputTokens: setting?.maxOutputTokens ?? 900,
         configured: Boolean(setting?.encryptedApiKey),
         keyHint: setting?.keyHint ?? null,
@@ -46,11 +48,11 @@ export const adminAiRouter = router({
   }),
 
   testConnection: adminProcedure
-    .input(z.object({ provider: providerSchema, model: z.string().trim().min(2).max(128), apiKey: z.string().trim().min(8).max(1_000) }))
-    .mutation(async ({ input }) => verifyProviderConnection(input)),
+    .input(z.object({ provider: providerSchema, model: z.string().trim().min(2).max(128), apiKey: z.string().trim().min(8).max(1_000), customBaseUrl: z.string().trim().max(512).optional() }))
+    .mutation(async ({ input }) => verifyProviderConnection({ ...input, customBaseUrl: await validateCustomBaseUrl(input.provider, input.customBaseUrl) })),
 
   listModels: adminProcedure
-    .input(z.object({ provider: providerSchema, apiKey: z.string().trim().min(8).max(1_000).optional() }))
+    .input(z.object({ provider: providerSchema, apiKey: z.string().trim().min(8).max(1_000).optional(), customBaseUrl: z.string().trim().max(512).optional() }))
     .mutation(async ({ input }) => {
       const db = requireDatabase(await getDb());
       const [existing] = input.apiKey
@@ -58,7 +60,8 @@ export const adminAiRouter = router({
         : await db.select().from(aiProviderSettings).where(eq(aiProviderSettings.provider, input.provider)).limit(1);
       const apiKey = input.apiKey ?? (existing?.encryptedApiKey ? decryptProviderKey(existing.encryptedApiKey) : null);
       if (!apiKey) throw new Error("أدخل مفتاح API لجلب النماذج، أو احفظ مفتاحًا مشفرًا لهذا المزود أولًا.");
-      return listProviderModels({ provider: input.provider, apiKey });
+      const customBaseUrl = await validateCustomBaseUrl(input.provider, input.customBaseUrl ?? existing?.customBaseUrl);
+      return listProviderModels({ provider: input.provider, apiKey, customBaseUrl });
     }),
 
   save: adminProcedure
@@ -68,6 +71,7 @@ export const adminAiRouter = router({
         model: z.string().trim().min(2).max(128),
         maxOutputTokens: z.number().int().min(128).max(8_000).default(900),
         apiKey: z.string().trim().min(8).max(1_000).optional(),
+        customBaseUrl: z.string().trim().max(512).optional(),
         enabled: z.boolean(),
         makeActive: z.boolean(),
       }),
@@ -77,12 +81,13 @@ export const adminAiRouter = router({
       const [existing] = await db.select().from(aiProviderSettings).where(eq(aiProviderSettings.provider, input.provider)).limit(1);
       const encryptedApiKey = input.apiKey ? encryptProviderKey(input.apiKey) : existing?.encryptedApiKey ?? null;
       const keyHint = input.apiKey ? getKeyHint(input.apiKey) : existing?.keyHint ?? null;
+      const customBaseUrl = await validateCustomBaseUrl(input.provider, input.customBaseUrl ?? existing?.customBaseUrl);
       if (input.enabled && !encryptedApiKey) throw new Error("أضف مفتاح API قبل تفعيل هذا المزود.");
       if (input.makeActive && !input.enabled) throw new Error("يجب تفعيل المزود قبل اختياره كمزود نشط.");
 
       const keyToVerify = input.apiKey ?? (existing?.encryptedApiKey ? decryptProviderKey(existing.encryptedApiKey) : null);
       if (keyToVerify && (Boolean(input.apiKey) || input.enabled || input.makeActive)) {
-        const verification = await verifyProviderConnection({ provider: input.provider, apiKey: keyToVerify, model: input.model });
+        const verification = await verifyProviderConnection({ provider: input.provider, apiKey: keyToVerify, model: input.model, customBaseUrl });
         if (!verification.valid) throw new Error(verification.message);
       }
 
@@ -99,6 +104,7 @@ export const adminAiRouter = router({
             encryptedApiKey,
             keyHint,
             model: input.model,
+            customBaseUrl,
             maxOutputTokens: input.maxOutputTokens,
             enabled: input.enabled ? 1 : 0,
             isActive,
@@ -109,6 +115,7 @@ export const adminAiRouter = router({
               encryptedApiKey,
               keyHint,
               model: input.model,
+              customBaseUrl,
               maxOutputTokens: input.maxOutputTokens,
               enabled: input.enabled ? 1 : 0,
               isActive,

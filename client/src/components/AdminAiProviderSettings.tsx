@@ -18,6 +18,7 @@ const providers = aiProviderIds.map(id => ({ id, ...aiProviderDefinitions[id] })
 type ProviderSetting = {
   provider: Provider;
   model: string;
+  customBaseUrl: string | null;
   maxOutputTokens: number;
   configured: boolean;
   keyHint: string | null;
@@ -54,6 +55,7 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
   const listModels = trpc.auth.admin.ai.listModels.useMutation();
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(setting.model || meta.defaultModel);
+  const [customBaseUrl, setCustomBaseUrl] = useState(setting.customBaseUrl ?? "");
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [maxOutputTokens, setMaxOutputTokens] = useState(String(setting.maxOutputTokens || 900));
@@ -62,9 +64,10 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
 
   useEffect(() => {
     setModel(setting.model || meta.defaultModel);
+    setCustomBaseUrl(setting.customBaseUrl ?? "");
     setMaxOutputTokens(String(setting.maxOutputTokens || 900));
     setEnabled(setting.enabled);
-  }, [meta.defaultModel, setting.enabled, setting.maxOutputTokens, setting.model]);
+  }, [meta.defaultModel, setting.customBaseUrl, setting.enabled, setting.maxOutputTokens, setting.model]);
 
   const loadCatalog = (announce: boolean) => {
     const key = apiKey.trim();
@@ -74,7 +77,7 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
     }
     if (announce) setStatus(null);
     listModels.mutate(
-      { provider: meta.id, apiKey: key || undefined },
+      { provider: meta.id, apiKey: key || undefined, customBaseUrl: customBaseUrl.trim() },
       {
         onSuccess: result => {
           if (!result.success) {
@@ -102,6 +105,7 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
       model: model.trim() || meta.defaultModel,
       maxOutputTokens: Math.min(8000, Math.max(128, Number(maxOutputTokens) || 900)),
       apiKey: apiKey.trim() || undefined,
+      customBaseUrl: customBaseUrl.trim(),
       enabled,
       makeActive,
     });
@@ -114,7 +118,7 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
       return;
     }
     setStatus(null);
-    testConnection.mutate({ provider: meta.id, apiKey: key, model: model.trim() || meta.defaultModel });
+    testConnection.mutate({ provider: meta.id, apiKey: key, model: model.trim() || meta.defaultModel, customBaseUrl: customBaseUrl.trim() });
   };
 
   const updatedAt = setting.updatedAt ? new Date(setting.updatedAt).toLocaleDateString("ar", { dateStyle: "medium" }) : null;
@@ -153,6 +157,20 @@ function ProviderCard({ setting, meta }: { setting: ProviderSetting; meta: (type
           />
           <p className="flex items-center gap-1.5 text-[11px] leading-5 text-muted-foreground"><EyeOff className="size-3.5" />لا يُعرض المفتاح ولا يمكن استعادته بعد الحفظ؛ يظهر التلميح المقنّع فقط. اختبار الاتصال لا يحفظ المفتاح.</p>
         </div>
+        {meta.protocol === "openai" ? <div className="grid gap-2">
+          <Label htmlFor={`${meta.id}-base-url`}>عنوان API الأساسي المخصص</Label>
+          <Input
+            id={`${meta.id}-base-url`}
+            dir="ltr"
+            type="url"
+            autoComplete="url"
+            value={customBaseUrl}
+            onChange={event => setCustomBaseUrl(event.target.value)}
+            placeholder={meta.baseUrl ?? "https://api.example.com/v1"}
+            className="border-white/10 bg-black/15 font-mono text-sm"
+          />
+          <p className="text-[11px] leading-5 text-muted-foreground">اختياري للمزودات المتوافقة مع OpenAI. استخدم HTTPS فقط، مثل <span dir="ltr">https://gateway.example.com/v1</span>. لا تُقبل العناوين المحلية أو عناوين IP المباشرة.</p>
+        </div> : null}
         <div className="grid gap-2">
           <div className="flex items-center justify-between gap-2"><Label htmlFor={`${meta.id}-model`}>اسم النموذج الافتراضي</Label><span className="text-[11px] text-muted-foreground">اختياري يدويًا</span></div>
           <div className="flex flex-wrap gap-2">
@@ -244,7 +262,7 @@ export function AdminAiProviderSettings() {
         {isCheckingMarket ? <Badge variant="outline"><Loader2 className="ml-1 size-3.5 animate-spin" />جارٍ الفحص</Badge> : marketStatus?.status === "healthy" ? <Badge className="bg-emerald-500/15 text-emerald-300"><CheckCircle2 className="ml-1 size-3.5" />متصل · {marketStatus.toolCount} أداة</Badge> : <Badge variant="outline" className="border-amber-300/30 bg-amber-300/10 text-amber-200"><ShieldAlert className="ml-1 size-3.5" />يتعذر التحقق الآن</Badge>}
       </Panel>
       <div className="grid gap-4 xl:grid-cols-3">
-        {providers.map(meta => <ProviderCard key={meta.id} meta={meta} setting={settings.find(setting => setting.provider === meta.id) ?? { provider: meta.id, model: meta.defaultModel, maxOutputTokens: 900, configured: false, keyHint: null, enabled: false, isActive: false, updatedAt: null }} />)}
+        {providers.map(meta => <ProviderCard key={meta.id} meta={meta} setting={settings.find(setting => setting.provider === meta.id) ?? { provider: meta.id, model: meta.defaultModel, customBaseUrl: null, maxOutputTokens: 900, configured: false, keyHint: null, enabled: false, isActive: false, updatedAt: null }} />)}
       </div>
     </section>
   );

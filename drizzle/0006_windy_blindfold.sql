@@ -1,0 +1,1 @@
+ALTER TABLE `aiProviderSettings` ADD `customBaseUrl` varchar(512);

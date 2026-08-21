@@ -114,6 +114,7 @@ export const aiProviderSettings = mysqlTable(
     encryptedApiKey: text("encryptedApiKey"),
     keyHint: varchar("keyHint", { length: 16 }),
     model: varchar("model", { length: 128 }).notNull(),
+    customBaseUrl: varchar("customBaseUrl", { length: 512 }),
     maxOutputTokens: int("maxOutputTokens").default(900).notNull(),
     enabled: int("enabled").default(0).notNull(),
     isActive: int("isActive").default(0).notNull(),
