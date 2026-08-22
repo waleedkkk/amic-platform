@@ -32,12 +32,21 @@ export type CandleHistory = {
 const CHART_TIMEOUT_MS = 25_000;
 const CHART_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const TWELVE_DATA_BASE_URL = "https://api.twelvedata.com/time_series";
+const MIN_RENDERABLE_CANDLE_COUNT = 2;
 
 /** فواصل الشموع القصيرة تُحدّث بسرعة مضبوطة؛ البث المباشر للعملات لا يمر بهذا المسار. */
 export function candleCacheTtlMs(interval: CandleInterval): number {
   if (interval === "1m" || interval === "5m") return 30_000;
   if (interval === "15m" || interval === "30m" || interval === "60m") return 60_000;
   return 5 * 60 * 1000;
+}
+
+/**
+ * عمود timeframe في marketSnapshots يصف الإطار فقط (حتى 8 أحرف).
+ * النطاق والحد جزءان من cacheKey، لذلك لا يجوز دمجهما هنا.
+ */
+export function candleSnapshotTimeframe(interval: CandleInterval): CandleInterval {
+  return interval;
 }
 
 export function tvSymbolToYahoo(symbol: string, exchange: string): string {
@@ -81,11 +90,27 @@ export function twelveDataInterval(interval: CandleInterval): string {
   return interval;
 }
 
-function twelveDataOutputSize(range: string): number {
-  if (range === "5d") return 1_000;
-  if (range === "1mo") return 1_500;
-  if (range === "6mo") return 3_000;
-  return 5_000;
+function normalizeCandleLimit(limit?: number): number {
+  return Math.min(5_000, Math.max(60, Math.round(limit ?? 5_000)));
+}
+
+/**
+ * نعرض التاريخ القصير الصالح بدل إخفاء المخطط بالكامل؛ تتطلب الشموع التاريخية
+ * نقطتين على الأقل، بينما يمنع العميل دمج شمعة البث المنفردة عند غياب التاريخ.
+ */
+export function hasRenderableCandleHistory(candles: Candle[], limit?: number): boolean {
+  void limit;
+  return candles.length >= MIN_RENDERABLE_CANDLE_COUNT;
+}
+
+function twelveDataOutputSize(range: string, limit?: number): number {
+  const rangeLimit = (() => {
+    if (range === "5d") return 1_000;
+    if (range === "1mo") return 1_500;
+    if (range === "6mo") return 3_000;
+    return 5_000;
+  })();
+  return Math.min(rangeLimit, normalizeCandleLimit(limit));
 }
 
 interface YahooChartResult {
@@ -148,18 +173,21 @@ export async function fetchTwelveDataCandleHistory(
   interval: CandleInterval,
   range: string,
   apiKey = process.env.TWELVE_DATA_API_KEY,
+  limit?: number,
 ): Promise<CandleHistory> {
   if (!apiKey) throw new Error("Twelve Data API key is not configured");
   const providerSymbol = tvSymbolToTwelveData(symbol, exchange);
   const url = new URL(TWELVE_DATA_BASE_URL);
   url.searchParams.set("symbol", providerSymbol);
   url.searchParams.set("interval", twelveDataInterval(interval));
-  url.searchParams.set("outputsize", String(twelveDataOutputSize(range)));
+  url.searchParams.set("outputsize", String(twelveDataOutputSize(range, limit)));
   url.searchParams.set("apikey", apiKey);
   const response = JSON.parse(await fetchJson(url.toString())) as TwelveDataResponse;
   if (response.status === "error" || !response.values?.length) throw new Error(response.message ?? "Twelve Data returned no candle data");
-  const candles = buildTwelveDataCandles(response.values);
-  if (!candles.length) throw new Error("Twelve Data returned invalid candle data");
+  const candles = buildTwelveDataCandles(response.values).slice(-normalizeCandleLimit(limit));
+  if (!hasRenderableCandleHistory(candles, limit)) {
+    throw new Error("Twelve Data returned insufficient candle history");
+  }
   return {
     symbol, yahooSymbol: providerSymbol, provider: "twelve-data", interval, candles,
     currency: response.meta?.currency ?? "", exchangeName: response.meta?.exchange ?? exchange,
@@ -167,10 +195,10 @@ export async function fetchTwelveDataCandleHistory(
   };
 }
 
-export async function fetchCandleHistory(symbol: string, exchange: string, interval: CandleInterval, range: string): Promise<CandleHistory> {
+export async function fetchCandleHistory(symbol: string, exchange: string, interval: CandleInterval, range: string, limit?: number): Promise<CandleHistory> {
   if (process.env.TWELVE_DATA_API_KEY) {
     try {
-      return await fetchTwelveDataCandleHistory(symbol, exchange, interval, range);
+      return await fetchTwelveDataCandleHistory(symbol, exchange, interval, range, undefined, limit);
     } catch (error) {
       console.warn(`[Candles] Twelve Data unavailable for ${exchange}:${symbol}; using Yahoo fallback`, error instanceof Error ? error.message : String(error));
     }
@@ -181,8 +209,10 @@ export async function fetchCandleHistory(symbol: string, exchange: string, inter
   const parsed = JSON.parse(await fetchJson(url)) as YahooChartResponse;
   const result = parsed.chart.result?.[0];
   if (!result) throw new Error(parsed.chart.error ?? "chart provider returned no data");
-  const candles = buildCandles(result);
-  if (!candles.length) throw new Error("chart provider returned an empty candle series");
+  const candles = buildCandles(result).slice(-normalizeCandleLimit(limit));
+  if (!hasRenderableCandleHistory(candles, limit)) {
+    throw new Error("chart provider returned insufficient candle history");
+  }
   return {
     symbol, yahooSymbol, provider: "yahoo", interval, candles,
     currency: result.meta.currency ?? "", exchangeName: result.meta.exchangeName ?? exchange,
@@ -190,14 +220,23 @@ export async function fetchCandleHistory(symbol: string, exchange: string, inter
   };
 }
 
-export async function getCandleHistoryCached(symbol: string, exchange: string, interval: CandleInterval, range: string): Promise<CandleHistory> {
-  const cacheKey = `candles:${exchange}:${symbol}:${interval}:${range}`;
+export async function getCandleHistoryCached(symbol: string, exchange: string, interval: CandleInterval, range: string, limit?: number): Promise<CandleHistory> {
+  const normalizedLimit = normalizeCandleLimit(limit);
+  const cacheKey = `candles:${exchange}:${symbol}:${interval}:${range}:${normalizedLimit}`;
   const existing = await getMarketSnapshot(cacheKey);
-  if (existing) return existing as CandleHistory;
-  const history = await fetchCandleHistory(symbol, exchange, interval, range);
-  await saveMarketSnapshot({
-    cacheKey, market: "candles", exchange, timeframe: `${interval}:${range}`, payload: history,
-    expiresAt: new Date(Date.now() + candleCacheTtlMs(interval)),
-  });
+  if (existing) {
+    const cached = existing as CandleHistory;
+    if (hasRenderableCandleHistory(cached.candles, normalizedLimit)) return cached;
+  }
+  const history = await fetchCandleHistory(symbol, exchange, interval, range, normalizedLimit);
+  try {
+    await saveMarketSnapshot({
+      cacheKey, market: "candles", exchange, timeframe: candleSnapshotTimeframe(interval), payload: history,
+      expiresAt: new Date(Date.now() + candleCacheTtlMs(interval)),
+    });
+  } catch (error) {
+    // الكاش تحسين أداء فقط؛ لا يجب أن يحجب تاريخ السعر الصحيح عن المخطط.
+    console.warn(`[Candles] Failed to persist cache for ${cacheKey}; returning fresh history`, error instanceof Error ? error.message : String(error));
+  }
   return history;
 }

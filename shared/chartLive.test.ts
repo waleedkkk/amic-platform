@@ -17,6 +17,11 @@ describe("مسار البث الحي للشارت", () => {
     expect(merged[0].close).toBe(103);
   });
 
+  it("لا يعرض شمعة بث منفردة قبل وصول التاريخ", () => {
+    const live = { time: 1_700_000_000, open: 100, high: 104, low: 99, close: 103, volume: 12.5 };
+    expect(mergeLiveCandle([], live)).toEqual([]);
+  });
+
   it("يتجاهل رسائل البث غير الصالحة", () => {
     expect(parseBinanceKlineMessage("غير صالح")).toBeNull();
     expect(parseBinanceKlineMessage({ k: { t: "x" } })).toBeNull();

@@ -1,11 +1,13 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } from "@shared/movingAverageCrossover";
 import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStructure";
 import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
 import { DEFAULT_CHART_LAYERS, normalizeChartLayers, type ChartLayerPreferences } from "@shared/chartPreferences";
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
+import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import {
   CandlestickSeries,
@@ -107,12 +109,13 @@ type ProposedRiskLevels = { stopLoss: string; takeProfit: string; stopLossSource
 
 export function CandlestickChart(props: { symbol: string; exchange: string; onCrossoverChange?: (crossover: MovingAverageCrossover | null, interval: ChartInterval) => void; proposedRiskLevels?: ProposedRiskLevels | null }) {
   const { symbol, exchange, onCrossoverChange, proposedRiskLevels } = props;
+  const { isAuthenticated } = useAuth();
   const [interval, setInterval] = useState<ChartInterval>("1d");
   const [visible, setVisible] = useState<ChartLayerPreferences>(DEFAULT_CHART_LAYERS);
-  const chartPreferencesQuery = trpc.market.chartPreferences.get.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
+  const chartPreferencesQuery = trpc.market.chartPreferences.get.useQuery(undefined, { staleTime: 60 * 60 * 1000, enabled: isAuthenticated });
   const saveChartPreferences = trpc.market.chartPreferences.save.useMutation();
-  const structureAlertsQuery = trpc.structureAlerts.list.useQuery();
-  const savedSignalsQuery = trpc.signals.list.useQuery();
+  const structureAlertsQuery = trpc.structureAlerts.list.useQuery(undefined, { enabled: isAuthenticated });
+  const savedSignalsQuery = trpc.signals.list.useQuery(undefined, { enabled: isAuthenticated });
   const createStructureAlert = trpc.structureAlerts.create.useMutation({ onSuccess: () => structureAlertsQuery.refetch() });
   const cancelStructureAlert = trpc.structureAlerts.cancel.useMutation({ onSuccess: () => structureAlertsQuery.refetch() });
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
@@ -120,15 +123,24 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const [liveCandle, setLiveCandle] = useState<LiveChartCandle | null>(null);
   const [liveStatus, setLiveStatus] = useState<ChartLiveProviderStatus>("delayed");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [chartWidth, setChartWidth] = useState(0);
+  const [settledChartWidth, setSettledChartWidth] = useState(0);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSettledChartWidth(chartWidth), 150);
+    return () => window.clearTimeout(timer);
+  }, [chartWidth]);
+  const adaptiveCandleLimit = useMemo(() => getAdaptiveCandleLimit(settledChartWidth), [settledChartWidth]);
+  const canLoadChartData = shouldLoadChartData(symbol, exchange);
   const candlesQuery = trpc.market.candles.useQuery(
-    { symbol, exchange, interval: interval as "60m" | "1d" | "1wk" | "1mo", range: intervalToRange(interval) },
-    { refetchOnWindowFocus: true, refetchInterval: interval === "1m" || interval === "5m" ? 30_000 : interval === "15m" || interval === "60m" ? 60_000 : 5 * 60_000, enabled: Boolean(symbol) && Boolean(exchange) },
+    { symbol, exchange, interval, range: intervalToRange(interval), limit: adaptiveCandleLimit },
+    { refetchOnWindowFocus: true, refetchInterval: interval === "1m" || interval === "5m" ? 30_000 : interval === "15m" || interval === "60m" ? 60_000 : 5 * 60_000, enabled: canLoadChartData, retry: 1 },
   );
   const twelveLiveQuote = trpc.market.liveQuote.useQuery(
     { symbol, exchange },
-    { enabled: Boolean(symbol) && Boolean(exchange) && exchange.toUpperCase() !== "BINANCE", refetchInterval: 2_500, refetchOnWindowFocus: true },
+    { enabled: isAuthenticated && Boolean(symbol) && Boolean(exchange) && exchange.toUpperCase() !== "BINANCE", refetchInterval: 2_500, refetchOnWindowFocus: true },
   );
-  const chartCandles = useMemo(() => mergeLiveCandle(candlesQuery.data?.candles ?? [], liveCandle), [candlesQuery.data?.candles, liveCandle]);
+  const historicalCandles = candlesQuery.data?.candles ?? [];
+  const chartCandles = useMemo(() => mergeLiveCandle(historicalCandles, liveCandle), [historicalCandles, liveCandle]);
   const latestCrossover = useMemo(
     () => findLatestSmaCrossover(chartCandles),
     [chartCandles],
@@ -211,10 +223,12 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
 
   // Create chart once per container
   useEffect(() => {
-    if (!containerRef.current) return;
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height: 380,
+    const container = containerRef.current;
+    if (!container) return;
+    const initialHeight = getChartViewportHeight(container.clientHeight);
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height: initialHeight,
       ...chartTheme,
       rightPriceScale: { borderColor: "rgba(141,162,181,0.12)" },
     });
@@ -261,11 +275,15 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
 
     const resizeObserver = new ResizeObserver(entries => {
       const entry = entries[0];
-      if (entry?.contentRect.width && chartRef.current) {
-        chartRef.current.applyOptions({ width: entry.contentRect.width });
+      const width = Math.round(entry?.contentRect.width ?? 0);
+      const height = getChartViewportHeight(entry?.contentRect.height ?? initialHeight);
+      if (width > 0 && chartRef.current) {
+        chartRef.current.applyOptions({ width, height });
+        setChartWidth(width);
       }
     });
-    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(container);
+    setChartWidth(Math.round(container.clientWidth));
     return () => {
       resizeObserver.disconnect();
       chart.remove();
@@ -485,8 +503,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             </span>
           </div>
         </div>
-        <div className="relative min-h-[220px]">
-          <div ref={containerRef} className="h-[300px] w-full sm:h-[380px]" />
+        <div className="relative h-[300px] min-h-[220px] overflow-hidden rounded-xl sm:h-[380px]">
+          <div ref={containerRef} className="h-full w-full" />
           {candlesQuery.isLoading && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/45 backdrop-blur-[2px]">
               <Spinner className="size-5 text-primary" />
@@ -501,7 +519,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
           )}
           {!candlesQuery.isLoading && !candlesQuery.isError && !candlesQuery.data?.candles?.length && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/45 backdrop-blur-[2px]">
-              <p className="text-sm text-muted-foreground">لا تتوفر سلسلة شموع لهذا الرمز في النطاق المحدد.</p>
+              <p className="max-w-xs px-4 text-center text-sm text-muted-foreground">لا تتوفر سلسلة شموع تاريخية لهذا الرمز في النطاق المحدد. لن تُعرض شمعة بث منفردة حتى يكتمل التاريخ.</p>
             </div>
           )}
         </div>
@@ -514,8 +532,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
           {candlesQuery.data ? (
             <>
-              <span className="font-mono">
-                {chartCandles.length} شمعة · {candlesQuery.data.interval} ·{" "}
+              <span className="font-mono" title="يُضبط الحد تلقائيًا بحسب اتساع مساحة المخطط، مع الحفاظ على شموع كافية للمؤشرات وبنية السعر.">
+                {chartCandles.length} شمعة · عرض متكيف حتى {adaptiveCandleLimit} · {candlesQuery.data.interval} ·{" "}
                 {candlesQuery.data.exchangeName}
               </span>
               <span className={livePresentation.className}>{livePresentation.label}</span>

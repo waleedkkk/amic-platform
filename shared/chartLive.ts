@@ -55,7 +55,8 @@ export function parseBinanceKlineMessage(payload: unknown): LiveChartCandle | nu
 export function mergeLiveCandle<T extends LiveChartCandle>(history: T[], live: LiveChartCandle | null): T[] {
   if (!live) return history;
   const previous = history.at(-1);
-  if (!previous) return [live as T];
+  // لا تعرض شمعة البث وحدها: الرسم يحتاج تاريخًا أوليًا لكي لا يبدو كأنه فقد السلسلة.
+  if (!previous) return history;
   if (previous.time === live.time) return [...history.slice(0, -1), live as T];
   if (live.time > previous.time) return [...history, live as T];
   return history;

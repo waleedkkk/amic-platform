@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { fetchTwelveDataCandleHistory } from "./candles";
 
+const liveIt = process.env.RUN_LIVE_PROVIDER_TESTS === "1" ? it : it.skip;
+
 describe("Twelve Data credential", () => {
-  it("يصل إلى نقطة سلاسل زمنية خفيفة باستخدام المفتاح الخادمي", async () => {
+  liveIt("يصل إلى نقطة سلاسل زمنية خفيفة باستخدام المفتاح الخادمي عند تفعيل الاختبار الحي", async () => {
     const apiKey = process.env.TWELVE_DATA_API_KEY;
     expect(apiKey, "TWELVE_DATA_API_KEY يجب أن يكون مضبوطًا").toBeTruthy();
 

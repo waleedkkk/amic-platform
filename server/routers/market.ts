@@ -217,17 +217,19 @@ export const marketRouter = router({
     .input(z.object({ name: toolName, args: z.record(z.string(), z.unknown()).default({}) }))
     .mutation(({ input }) => callTradingViewTool(input.name, input.args)),
 
-  candles: protectedProcedure
+  // بيانات الشموع تاريخية عامة ومخزنة مؤقتاً؛ لا ينبغي أن يمنع غياب الجلسة عرض مخطط صفحة التحليل العامة.
+  candles: publicProcedure
     .input(
       z.object({
         symbol: z.string().min(1).max(32),
         exchange: z.string().min(1).max(32),
         interval: candleInterval.default("1d"),
         range: candleRange.optional(),
+        limit: z.number().int().min(120).max(600).optional(),
       }),
     )
     .query(({ input }) =>
-      getCandleHistoryCached(input.symbol, input.exchange, input.interval, input.range ?? intervalToRange(input.interval)),
+      getCandleHistoryCached(input.symbol, input.exchange, input.interval, input.range ?? intervalToRange(input.interval), input.limit),
     ),
 
   chartPreferences: router({
