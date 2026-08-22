@@ -8,6 +8,7 @@ import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage, type 
 import { DEFAULT_CHART_LAYERS, normalizeChartLayers, type ChartLayerPreferences } from "@shared/chartPreferences";
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
+import { getChartOverlayDensity } from "@/lib/chartOverlayDensity";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import {
   CandlestickSeries,
@@ -352,6 +353,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     setStructureDetail({ events: structure.events.slice(-4).reverse(), zones: structure.zones.slice(-4).reverse() });
     const latestSupport = structure.levels.filter(level => level.kind === "support").sort((a, b) => b.createdAt - a.createdAt)[0];
     const latestResistance = structure.levels.filter(level => level.kind === "resistance").sort((a, b) => b.createdAt - a.createdAt)[0];
+    const overlayDensity = getChartOverlayDensity(chartWidth);
     apply(overlays.support, visible.levels, data.map(c => ({ time: c.time as Time, value: latestSupport?.price ?? fallbackLevels.support })));
     apply(overlays.resistance, visible.levels, data.map(c => ({ time: c.time as Time, value: latestResistance?.price ?? fallbackLevels.resistance })));
 
@@ -362,13 +364,13 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [] };
 
     if (visible.levels) {
-      decorationsRef.current.levelLines = structure.levels.slice(-6).map(level => candlesSeries.createPriceLine({
+      decorationsRef.current.levelLines = structure.levels.slice(-overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
         price: level.price,
         color: level.kind === "support" ? "rgba(22,163,74,0.46)" : "rgba(220,38,38,0.46)",
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
-        title: `${level.kind === "support" ? "دعم" : "مقاومة"} ×${level.touches}`,
+        title: overlayDensity.compact ? (level.kind === "support" ? "دعم" : "مقاومة") : `${level.kind === "support" ? "دعم" : "مقاومة"} ×${level.touches}`,
       }));
     }
 
@@ -379,24 +381,24 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       ].filter(item => item.source.kind !== "fallback" && Number.isFinite(Number(item.value)) && Number(item.value) > 0);
       decorationsRef.current.proposalLines = sourceLines.flatMap(item => [
         candlesSeries.createPriceLine({
-          price: item.source.level!, color: item.color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true,
+          price: item.source.level!, color: item.color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: overlayDensity.showProposalAxisLabels,
           title: `المستوى المصدر · ${item.source.label}`,
         }),
         candlesSeries.createPriceLine({
-          price: Number(item.value), color: item.color, lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
+          price: Number(item.value), color: item.color, lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: overlayDensity.showProposalAxisLabels,
           title: `${item.label} المقترح`,
         }),
       ]);
     }
 
     if (visible.zones) {
-      decorationsRef.current.zoneLines = structure.zones.slice(-4).flatMap(zone => [
+      decorationsRef.current.zoneLines = structure.zones.slice(-overlayDensity.zoneLimit).flatMap(zone => [
         candlesSeries.createPriceLine({
           price: zone.high,
           color: zone.kind === "demand" ? "rgba(16,185,129,0.5)" : "rgba(251,113,133,0.5)",
           lineWidth: 1,
           lineStyle: LineStyle.Dotted,
-          axisLabelVisible: true,
+          axisLabelVisible: overlayDensity.showZoneAxisLabels,
           title: `${zone.kind === "demand" ? "طلب" : "عرض"} · أعلى`,
         }),
         candlesSeries.createPriceLine({
@@ -448,7 +450,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     }
 
     chart.timeScale().fitContent();
-  }, [stableKey, chartCandles, exchange, proposedRiskLevels, savedSignalsQuery.data, symbol, visible]);
+  }, [stableKey, chartCandles, chartWidth, exchange, proposedRiskLevels, savedSignalsQuery.data, symbol, visible]);
 
   const toggle = (key: keyof ChartLayerPreferences) => {
     const next = { ...visible, [key]: !visible[key] };

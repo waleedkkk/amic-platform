@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "./adaptiveCandleWindow";
+import { getChartOverlayDensity } from "./chartOverlayDensity";
 
 describe("getAdaptiveCandleLimit", () => {
   it("يحافظ على حد أدنى يكفي للمؤشرات على الشاشات الضيقة", () => {
@@ -30,5 +31,27 @@ describe("getChartViewportHeight", () => {
     expect(getChartViewportHeight(300)).toBe(300);
     expect(getChartViewportHeight(379.6)).toBe(380);
     expect(getChartViewportHeight(0)).toBe(300);
+  });
+});
+
+describe("getChartOverlayDensity", () => {
+  it("يحد تسميات السعر الكثيفة على شاشة الهاتف مع إبقاء خطوط المستويات مرئية", () => {
+    expect(getChartOverlayDensity(320)).toEqual({
+      compact: true,
+      levelLimit: 2,
+      zoneLimit: 2,
+      showZoneAxisLabels: false,
+      showProposalAxisLabels: false,
+    });
+  });
+
+  it("يعيد كل تسميات المستويات والمناطق في مساحة المخطط المكتبية", () => {
+    expect(getChartOverlayDensity(768)).toEqual({
+      compact: false,
+      levelLimit: 6,
+      zoneLimit: 4,
+      showZoneAxisLabels: true,
+      showProposalAxisLabels: true,
+    });
   });
 });
