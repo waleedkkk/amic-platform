@@ -29,6 +29,8 @@ export default function TechnicalAnalysis() {
   const macd = findValue(data, ["macd", "MACD"]);
   const bollinger = findValue(data, ["bollinger", "BB", "bbw"]);
   const price = findValue(data, ["price", "close", "last"]);
+  const supportLevels = findValue(data, ["support", "support1", "pivot_support", "s1"]);
+  const resistanceLevels = findValue(data, ["resistance", "resistance1", "pivot_resistance", "r1"]);
   const confidence = Number(findValue(data, ["confidence", "confluence_score", "score"]) ?? 0);
   const unavailableMetrics = [["RSI", rsi], ["MACD", macd], ["Bollinger", bollinger]].filter(([, value]) => value === undefined).map(([label]) => label);
   const updatedAt = query.dataUpdatedAt ? new Date(query.dataUpdatedAt) : null;
@@ -48,7 +50,7 @@ export default function TechnicalAnalysis() {
     saveSignal.mutate({ symbol: params.symbol, exchange: params.exchange, timeframe: params.timeframe, recommendation: recommendationValue, confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(100, confidence)) : 0, summary: `قراءة ${params.symbol} على ${params.timeframe}: ${String(recommendation ?? "غير محدد")}${crossoverLabel ? ` · ${crossoverLabel}` : ""}`, analysisPayload: { ...analysisPayload, movingAverageCrossover } });
   };
   const handlePaperTrade = () => {
-    const draft = makeAnalysisTradeDraft({ symbol: params.symbol, exchange: params.exchange, recommendation, price, note: `مسودة من التحليل الفني ${params.timeframe}.` });
+    const draft = makeAnalysisTradeDraft({ symbol: params.symbol, exchange: params.exchange, recommendation, price, supportLevels, resistanceLevels, note: `مسودة من التحليل الفني ${params.timeframe}.` });
     if (!draft) return toast.error("تحتاج القراءة إلى توصية صريحة وسعر صالح قبل إنشاء مسودة صفقة.");
     storePaperTradeDraft(draft);
     navigate("/paper-trading");

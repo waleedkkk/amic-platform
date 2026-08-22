@@ -10,6 +10,11 @@ export type PaperTradeDraft = {
   note: string;
 };
 
+type AnalysisRiskInput = {
+  supportLevels?: unknown;
+  resistanceLevels?: unknown;
+};
+
 const PAPER_TRADE_DRAFT_KEY = "amic.paper-trade-draft.v1";
 
 export function assetClassForExchange(exchange: string): PaperTradeDraft["assetClass"] {
@@ -27,13 +32,48 @@ export function recommendationToSide(value: unknown): PaperTradeDraft["side"] | 
   return null;
 }
 
-export function makeAnalysisTradeDraft(input: { symbol: string; exchange: string; recommendation: unknown; price: unknown; note: string }): PaperTradeDraft | null {
+function collectPriceLevels(value: unknown, depth = 0): number[] {
+  if (depth > 3 || value === null || value === undefined) return [];
+  if (typeof value === "number") return Number.isFinite(value) && value > 0 ? [value] : [];
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, "").trim());
+    return Number.isFinite(parsed) && parsed > 0 ? [parsed] : [];
+  }
+  if (Array.isArray(value)) return value.flatMap(item => collectPriceLevels(item, depth + 1));
+  if (typeof value === "object") return Object.values(value as Record<string, unknown>).flatMap(item => collectPriceLevels(item, depth + 1));
+  return [];
+}
+
+function roundRiskLevel(value: number, entryPrice: number) {
+  const precision = entryPrice < 1 ? 8 : entryPrice < 100 ? 4 : 2;
+  return value.toFixed(precision);
+}
+
+export function suggestRiskLevels(side: PaperTradeDraft["side"], entryPrice: number, levels: AnalysisRiskInput = {}) {
+  const supports = collectPriceLevels(levels.supportLevels).filter(level => level < entryPrice).sort((a, b) => b - a);
+  const resistances = collectPriceLevels(levels.resistanceLevels).filter(level => level > entryPrice).sort((a, b) => a - b);
+  const nearestSupport = supports[0];
+  const nearestResistance = resistances[0];
+
+  if (side === "long") {
+    const stopLoss = nearestSupport ? nearestSupport * 0.997 : entryPrice * 0.98;
+    const risk = entryPrice - stopLoss;
+    const takeProfit = nearestResistance ?? entryPrice + risk * 2;
+    return { stopLoss: roundRiskLevel(stopLoss, entryPrice), takeProfit: roundRiskLevel(takeProfit, entryPrice), basis: nearestSupport || nearestResistance ? "مستويات الدعم/المقاومة المتاحة" : "هامش احتياطي عند غياب مستويات دعم/مقاومة صالحة" };
+  }
+
+  const stopLoss = nearestResistance ? nearestResistance * 1.003 : entryPrice * 1.02;
+  const risk = stopLoss - entryPrice;
+  const takeProfit = nearestSupport ?? entryPrice - risk * 2;
+  return { stopLoss: roundRiskLevel(stopLoss, entryPrice), takeProfit: roundRiskLevel(takeProfit, entryPrice), basis: nearestSupport || nearestResistance ? "مستويات الدعم/المقاومة المتاحة" : "هامش احتياطي عند غياب مستويات دعم/مقاومة صالحة" };
+}
+
+export function makeAnalysisTradeDraft(input: { symbol: string; exchange: string; recommendation: unknown; price: unknown; note: string } & AnalysisRiskInput): PaperTradeDraft | null {
   const side = recommendationToSide(input.recommendation);
   const entryPrice = Number(input.price);
   if (!side || !Number.isFinite(entryPrice) || entryPrice <= 0) return null;
 
-  const stopLoss = side === "long" ? entryPrice * 0.98 : entryPrice * 1.02;
-  const takeProfit = side === "long" ? entryPrice * 1.04 : entryPrice * 0.96;
+  const riskLevels = suggestRiskLevels(side, entryPrice, input);
   return {
     symbol: input.symbol.trim().toUpperCase(),
     exchange: input.exchange.trim().toUpperCase(),
@@ -41,9 +81,9 @@ export function makeAnalysisTradeDraft(input: { symbol: string; exchange: string
     side,
     quantity: "1",
     entryPrice: String(entryPrice),
-    stopLoss: stopLoss.toFixed(8),
-    takeProfit: takeProfit.toFixed(8),
-    note: `${input.note} القيم الافتراضية قابلة للتعديل وليست توصية استثمارية.`,
+    stopLoss: riskLevels.stopLoss,
+    takeProfit: riskLevels.takeProfit,
+    note: `${input.note} وقف الخسارة وجني الأرباح مقترحان من ${riskLevels.basis}، ويظلان قابلين للتعديل وليسا توصية استثمارية.`,
   };
 }
 

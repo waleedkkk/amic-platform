@@ -35,8 +35,10 @@ export default function Confluence() {
     return JSON.stringify(tf);
   };
   const aggAction = (data?.recommendation as { action?: string } | undefined)?.action;
+  const supportLevels = findValue(data as Record<string, unknown> | undefined, ["support", "support1", "pivot_support", "s1"]);
+  const resistanceLevels = findValue(data as Record<string, unknown> | undefined, ["resistance", "resistance1", "pivot_resistance", "r1"]);
   const handlePaperTrade = () => {
-    const draft = makeAnalysisTradeDraft({ symbol: params.symbol, exchange: params.exchange, recommendation: aggAction, price: quote.data?.price, note: "مسودة من توافق الأطر الزمنية." });
+    const draft = makeAnalysisTradeDraft({ symbol: params.symbol, exchange: params.exchange, recommendation: aggAction, price: quote.data?.price, supportLevels, resistanceLevels, note: "مسودة من توافق الأطر الزمنية." });
     if (!draft) return toast.error("تحتاج قراءة التوافق إلى اتجاه صريح وسعر سوق متاح قبل إنشاء المسودة.");
     storePaperTradeDraft(draft);
     navigate("/paper-trading");
