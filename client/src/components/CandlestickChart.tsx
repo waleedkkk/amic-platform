@@ -6,6 +6,7 @@ import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStru
 import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
 import { DEFAULT_CHART_LAYERS, normalizeChartLayers, type ChartLayerPreferences } from "@shared/chartPreferences";
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
+import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import {
   CandlestickSeries,
   createSeriesMarkers,
@@ -99,10 +100,13 @@ interface OverlaySeries {
 type StructureDecorations = {
   levelLines: IPriceLine[];
   zoneLines: IPriceLine[];
+  proposalLines: IPriceLine[];
 };
 
-export function CandlestickChart(props: { symbol: string; exchange: string; onCrossoverChange?: (crossover: MovingAverageCrossover | null, interval: ChartInterval) => void }) {
-  const { symbol, exchange, onCrossoverChange } = props;
+type ProposedRiskLevels = { stopLoss: string; takeProfit: string; stopLossSource: RiskLevelSource; takeProfitSource: RiskLevelSource };
+
+export function CandlestickChart(props: { symbol: string; exchange: string; onCrossoverChange?: (crossover: MovingAverageCrossover | null, interval: ChartInterval) => void; proposedRiskLevels?: ProposedRiskLevels | null }) {
+  const { symbol, exchange, onCrossoverChange, proposedRiskLevels } = props;
   const [interval, setInterval] = useState<ChartInterval>("1d");
   const [visible, setVisible] = useState<ChartLayerPreferences>(DEFAULT_CHART_LAYERS);
   const chartPreferencesQuery = trpc.market.chartPreferences.get.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
@@ -133,7 +137,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const overlaysRef = useRef<OverlaySeries | null>(null);
-  const decorationsRef = useRef<StructureDecorations>({ levelLines: [], zoneLines: [] });
+  const decorationsRef = useRef<StructureDecorations>({ levelLines: [], zoneLines: [], proposalLines: [] });
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const [hasVolume, setHasVolume] = useState(false);
   const [structureDetail, setStructureDetail] = useState<Pick<MarketStructure, "events" | "zones">>({ events: [], zones: [] });
@@ -269,7 +273,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       candleSeriesRef.current = null;
       overlaysRef.current = null;
       markersRef.current = null;
-      decorationsRef.current = { levelLines: [], zoneLines: [] };
+      decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [] };
     };
   }, []);
 
@@ -336,7 +340,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     const clearLines = (lines: IPriceLine[]) => lines.forEach(line => candlesSeries.removePriceLine(line));
     clearLines(decorationsRef.current.levelLines);
     clearLines(decorationsRef.current.zoneLines);
-    decorationsRef.current = { levelLines: [], zoneLines: [] };
+    clearLines(decorationsRef.current.proposalLines);
+    decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [] };
 
     if (visible.levels) {
       decorationsRef.current.levelLines = structure.levels.slice(-6).map(level => candlesSeries.createPriceLine({
@@ -347,6 +352,23 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         axisLabelVisible: true,
         title: `${level.kind === "support" ? "دعم" : "مقاومة"} ×${level.touches}`,
       }));
+    }
+
+    if (proposedRiskLevels) {
+      const sourceLines = [
+        { value: proposedRiskLevels.stopLoss, source: proposedRiskLevels.stopLossSource, label: "مصدر وقف الخسارة", color: "#f59e0b" },
+        { value: proposedRiskLevels.takeProfit, source: proposedRiskLevels.takeProfitSource, label: "مصدر جني الربح", color: "#38bdf8" },
+      ].filter(item => item.source.kind !== "fallback" && Number.isFinite(Number(item.value)) && Number(item.value) > 0);
+      decorationsRef.current.proposalLines = sourceLines.flatMap(item => [
+        candlesSeries.createPriceLine({
+          price: item.source.level!, color: item.color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true,
+          title: `المستوى المصدر · ${item.source.label}`,
+        }),
+        candlesSeries.createPriceLine({
+          price: Number(item.value), color: item.color, lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
+          title: `${item.label} المقترح`,
+        }),
+      ]);
     }
 
     if (visible.zones) {
@@ -408,7 +430,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     }
 
     chart.timeScale().fitContent();
-  }, [stableKey, chartCandles, exchange, savedSignalsQuery.data, symbol, visible]);
+  }, [stableKey, chartCandles, exchange, proposedRiskLevels, savedSignalsQuery.data, symbol, visible]);
 
   const toggle = (key: keyof ChartLayerPreferences) => {
     const next = { ...visible, [key]: !visible[key] };
