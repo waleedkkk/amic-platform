@@ -79,7 +79,169 @@
 | تجربة المستخدم | الواجهة عربية RTL أولًا، متجاوبة للهاتف، وتظهر حالات التحميل والخطأ والمزود بوضوح. |
 | الاختبارات | أي تعديل سلوكي أو أمني يجب أن يتضمن اختبارات Vitest مناسبة، ثم فحص TypeScript وبناء الإنتاج قبل النشر. |
 
-## 5. نموذج البيانات ومفردات المجال
+## 5. مخطط قاعدة البيانات التفصيلي
+
+تستخدم AMIC قاعدة **TiDB Cloud** المتوافقة مع MySQL، ويُعرّف مخططها المصدرّي في `drizzle/schema.ts`. تحتوي القاعدة الحالية على **12 جدولًا**. قاعدة البيانات هي مصدر الحقيقة للهوية والبيانات الشخصية والإعدادات والتنبيهات والصفقات الورقية، أما شموع السعر الحية والتاريخية فتُجلب من مزودي السوق ولا تُخزن كنسخ دائمة في جداول المستخدمين.
+
+### 5.1 خريطة العلاقات
+
+```mermaid
+erDiagram
+    USERS ||--o{ WATCHLISTS : "يملك"
+    USERS ||--o{ PAPER_TRADES : "يفتح"
+    USERS ||--o{ SAVED_SIGNALS : "يحفظ"
+    USERS ||--o{ METAL_ALERTS : "ينشئ"
+    USERS ||--o{ STRUCTURE_ALERTS : "ينشئ"
+    USERS ||--o{ USER_NOTIFICATIONS : "يتلقى"
+    USERS ||--o| USER_TELEGRAM_SETTINGS : "يضبط"
+    USERS ||--o| CHART_PREFERENCES : "يضبط"
+    USERS ||--o{ AI_PROVIDER_SETTINGS : "يحدّث إداريًا"
+
+    USERS {
+      int id PK
+      varchar email UK
+      varchar passwordHash
+      enum role
+    }
+    WATCHLISTS {
+      int id PK
+      int userId FK
+      varchar symbol
+      varchar exchange
+    }
+    PAPER_TRADES {
+      int id PK
+      int userId FK
+      enum status
+      decimal entryPrice
+      decimal realizedPnl
+    }
+    SAVED_SIGNALS {
+      int id PK
+      int userId FK
+      enum recommendation
+      json analysisPayload
+    }
+    METAL_ALERTS {
+      int id PK
+      int userId FK
+      enum status
+      decimal targetPrice
+    }
+    STRUCTURE_ALERTS {
+      int id PK
+      int userId FK
+      enum eventType
+      enum status
+    }
+    USER_NOTIFICATIONS {
+      int id PK
+      int userId FK
+      enum category
+      json metadata
+    }
+    USER_TELEGRAM_SETTINGS {
+      int userId PK_FK
+      varchar chatId
+      int enabled
+    }
+    CHART_PREFERENCES {
+      int userId PK_FK
+      json layers
+    }
+    AI_PROVIDER_SETTINGS {
+      int id PK
+      int updatedByUserId FK
+      varchar provider UK
+      text encryptedApiKey
+    }
+```
+
+يوضح المخطط العلاقات المرجعية الفعلية. توجد كذلك جداول تشغيلية لا تتبع مستخدمًا بعينه: `marketSnapshots` لتخزين كاش بيانات السوق العامة، و`metalAlertMonitorSettings` لتخزين معرّف مهمة المراقبة المجدولة الوحيدة. لا ينبغي ربطهما بـ `userId` أو التعامل معهما كسجلّين خاصين بمستخدم.
+
+### 5.2 جدول `users` — الهوية والصلاحيات
+
+هذا هو الجدول الأب لجميع البيانات المملوكة للمستخدم. المسار المعتمد حاليًا هو البريد وكلمة المرور؛ حقلا `openId` و`loginMethod` موجودان للتوافق مع صفوف قديمة ولا يعنيان أن OAuth جزء من تجربة الدخول الحالية.
+
+| الحقل | النوع والقيود | المعنى وقاعدة الاستخدام |
+|---|---|---|
+| `id` | `INT`، مفتاح أساسي، زيادة تلقائية | معرّف الملكية الداخلي المرجعي من بقية الجداول. |
+| `email` | `VARCHAR(320)`، فريد، قابل للفراغ على الصفوف القديمة | هوية تسجيل الدخول الحالية؛ لا تسمح بإنشاء مستخدمين جدد ببريد مكرر. |
+| `passwordHash` | `VARCHAR(255)`، قابل للفراغ للتوافق | تجزئة bcrypt فقط، ولا تحفظ كلمة مرور صريحة مطلقًا. |
+| `role` | `ENUM('user','admin')`، افتراضي `user` | يفرض الخادم صلاحيات الإدارة، ولا يكفي إخفاء زر الإدارة في الواجهة. |
+| `openId` | `VARCHAR(64)`، فريد، قابل للفراغ | حقل إرثي متوافق مع بيانات قديمة، وليس مسار مصادقة جديد. |
+| `name` و`loginMethod` | نصوص اختيارية | بيانات وصفية أو متوافقة مع الإرث. |
+| `createdAt` و`updatedAt` و`lastSignedIn` | طوابع زمنية | تدقيق دورة حياة الحساب؛ `updatedAt` يتغير تلقائيًا. |
+
+عند حذف مستخدم، تحذف البيانات التابعة ذات العلاقة الخارجية بإجراء `CASCADE`، باستثناء `aiProviderSettings.updatedByUserId` الذي يتحول إلى `NULL` ليبقى سجل إعداد المزوّد دون الاحتفاظ بمرجع مستخدم محذوف.
+
+### 5.3 الجداول المملوكة للمستخدم
+
+كل جدول في هذا القسم يجب الوصول إليه على الخادم باستخدام `userId` من الجلسة الموثقة، لا باستخدام قيمة يرسلها المتصفح بوصفها مصدر صلاحية.
+
+| الجدول | المفتاح والملكية | أهم الحقول | القيود والسلوك |
+|---|---|---|---|
+| `watchlists` | `id`؛ `userId → users.id` | `symbol`، `exchange`، `assetClass` | فهرس ملكية على `userId` وقيد فريد على `(userId, symbol, exchange)` يمنع تكرار نفس الأصل في قائمة المستخدم. `assetClass`: `crypto` أو `stock` أو `forex` أو `futures`. |
+| `paperTrades` | `id`؛ `userId → users.id` | الأصل، الاتجاه، الكمية، أسعار الدخول/الخروج، وقف الخسارة، جني الربح، الربح/الخسارة | `side`: `long|short`؛ `status`: `open|closed`. الأرقام المالية `DECIMAL(24,8)` وليست أعدادًا عائمة. لا تُغلق الصفقة إلا مع الشرط `(id, userId, status='open')`، وتُحسب `realizedPnl` على الخادم. |
+| `savedSignals` | `id`؛ `userId → users.id` | الرمز، البورصة، الإطار، التوصية، الثقة، الملخص، `analysisPayload` | `recommendation`: `strong_buy|buy|neutral|sell|strong_sell`. `analysisPayload` سجل JSON للتحليل المولد وقت الحفظ، وليس وعدًا بنتيجة تداول. |
+| `metalAlerts` | `id`؛ `userId → users.id` | `metal`، `direction`، `targetPrice`، حقول التفعيل | المعدن محصور في `XAUUSD|XAGUSD`؛ الاتجاه `above|below`؛ الحالة `active|triggered|cancelled`. يحتفظ بتفاصيل السعر والوقت عند التفعيل. |
+| `structureAlerts` | `id`؛ `userId → users.id` | الرمز، البورصة، الإطار، نوع الحدث، نتيجة المراقبة | الإطار محصور في `5m|15m|1h|4h|1d|1wk`؛ الحدث `breakout|breakdown|bullish_reversal|bearish_reversal`؛ الحالة `active|triggered|cancelled`. تحفظ النتيجة `triggeredPrice` و`triggeredEventKey` و`qualityScore` ووقت التفعيل. |
+| `userNotifications` | `id`؛ `userId → users.id` | `category`، العنوان، المحتوى، `metadata`، `readAt` | النوع `metal_alert|structure_alert`. جدول رسائل داخلية لا يخلط بيانات مستخدمين؛ حالة عدم القراءة هي `readAt = NULL`. يسترجع التطبيق أحدث 20 رسالة للمستخدم. |
+| `userTelegramSettings` | `userId` مفتاح أساسي وخارجي | `chatId`، `enabled`، `updatedAt` | علاقة واحد إلى واحد مع المستخدم. يُستخدم upsert؛ لا يجوز تفعيل الإرسال إذا كان `chatId` فارغًا. |
+| `chartPreferences` | `userId` مفتاح أساسي وخارجي | `layers`، `updatedAt` | علاقة واحد إلى واحد مع المستخدم. JSON `layers` يحتوي مفاتيح منطقية: `sma`, `ema`, `levels`, `zones`, `events`, `volume`. تُكمل القيم الناقصة بالقيم الافتراضية في الخادم. |
+
+### 5.4 جداول الإدارة والكاش والتشغيل
+
+هذه الجداول ليست بيانات مستخدم اعتيادية، ولذلك تختلف قواعد الوصول إليها. لا تعرّضها tRPC للمستخدم العادي بلا إجراء إداري أو خادمي مناسب.
+
+| الجدول | الغرض | الحقول الجوهرية | القيود وقاعدة التعامل |
+|---|---|---|---|
+| `aiProviderSettings` | إعداد مزوّدي نماذج الذكاء الاصطناعي على مستوى المنصة | `provider`، `encryptedApiKey`، `keyHint`، `model`، `customBaseUrl`، `maxOutputTokens`، `enabled`، `isActive`، `updatedByUserId` | `provider` فريد. المفتاح مخزن مشفرًا فقط ولا يعاد للعميل. يتم تغيير المزود النشط داخل معاملة إدارية تزيل تفعيل أي مزود نشط آخر؛ لذا الهدف التشغيلي هو مزود واحد مفعّل ونشط. `updatedByUserId` حقل تدقيق اختياري. |
+| `marketSnapshots` | كاش بيانات سوق عامة لتخفيف طلبات المصدر الخارجي | `cacheKey`، السوق، البورصة، الإطار، `payload`، وقت الجلب والانتهاء | `cacheKey` فريد و`payload` JSON غير مملوك لمستخدم. تقرأ الخدمة السجل فقط إذا كان `expiresAt` مستقبلًا، وتستخدم upsert لتحديثه. يوجد فهرس انتهاء على `expiresAt`. |
+| `metalAlertMonitorSettings` | إعداد تشغيلي منفرد لمراقب تنبيهات المعادن المجدول | `id`، `scheduleTaskUid`، الطوابع الزمنية | سجل شبه منفرد باستخدام `id = 1`، و`scheduleTaskUid` فريد. ليس جدول إعدادات لكل مستخدم. |
+
+### 5.5 الفهارس والقيود المهمة
+
+| المجال | الفهرس أو القيد | السبب |
+|---|---|---|
+| قوائم المستخدم | فهارس `userId` وتراكيب مثل `(userId, status)` و`(userId, createdAt)` | تسريع عرض صفقات وإشارات وتنبيهات مستخدم واحد دون مسح بيانات الجميع. |
+| المراقبة المجدولة | فهرسا `(status, metal)` و`(status, exchange, symbol, interval)` | تحميل التنبيهات النشطة فقط وتجميع فحصها بكفاءة. |
+| الإشعارات | `(userId, readAt, createdAt)` | عرض الإشعارات الحديثة وغير المقروءة لكل مستخدم. |
+| كاش السوق | `cacheKey` فريد و`expiresAt` مفهرس | استبدال اللقطة نفسها والبحث السريع عن صلاحيتها. |
+| مزود الذكاء الاصطناعي | `provider` فريد و`(isActive, enabled)` مفهرس | منع تكرار إعداد المزوّد وجلب المزوّد الفعال بسرعة. |
+
+### 5.6 قواعد العزل والنزاهة التي يجب أن يلتزم بها أي كود جديد
+
+> **قاعدة أساسية:** لا توجد سياسة عزل صفوف تلقائية في واجهة العميل. العزل مفروض في إجراءات الخادم باستعمال `ctx.user.id` ثم شرط `WHERE userId = ctx.user.id` في كل قراءة أو تعديل أو حذف لبيانات المستخدم.
+
+عند إضافة إجراء لجدول شخصي، يجب أن يتضمن شرط الملكية في العملية نفسها. المثال الصحيح لإغلاق صفقة هو الاستعلام والتحديث معًا على `id` و`userId`، لا جلب الصفقة بالـ `id` ثم افتراض أن الواجهة لم تتلاعب به. استخدم مفاتيح خارجية مع `CASCADE` للبيانات الشخصية الجديدة ما لم توجد حاجة تدقيقية صريحة للاحتفاظ بسجل دون مستخدم.
+
+يجب استخدام `DECIMAL` لكل مبلغ أو كمية أو سعر أو ربح/خسارة، وتطبيع الرمز والبورصة إلى أحرف كبيرة عند الإدخال. لا تضف JSON بلا عقد تحقق: الحقول الحالية ذات طبيعة JSON هي `analysisPayload` و`marketSnapshots.payload` و`userNotifications.metadata` و`chartPreferences.layers`. يجب أن يبقى محتوى `metadata` الخاص بالإشعار قليلًا وقابلاً للتفسير؛ قد يحوي معرف التنبيه والرمز والاتجاه والسعر والوقت ودرجة الجودة، لكنه ليس بديلًا عن جدول علائقي جديد إذا احتاج النظام لاحقًا استعلامات أو علاقات صارمة.
+
+### 5.7 دورات الحياة والآثار الجانبية
+
+| الكيان | الانتقال | الأثر المرافق |
+|---|---|---|
+| `paperTrades` | `open → closed` | يحفظ سعر الخروج ووقت الإغلاق و`realizedPnl`، ولا يسمح بإغلاق ثانٍ. |
+| `metalAlerts` | `active → triggered` أو `cancelled` | تسجل المراقبة السعر والوقت، ثم تُنشئ `userNotifications` من فئة `metal_alert` وقد ترسل تيليغرام عند تفعيل إعداد المستخدم. |
+| `structureAlerts` | `active → triggered` أو `cancelled` | تسجل السعر ومفتاح الحدث ودرجة الجودة والوقت، ثم تنشئ إشعار `structure_alert` وقد ترسل تيليغرام. |
+| `userNotifications` | غير مقروء → مقروء | يكتب `readAt` مرة واحدة ضمن شرط أن تكون القيمة `NULL`. |
+| `chartPreferences` و`userTelegramSettings` | إنشاء أو تعديل | تستخدم عمليات upsert على `userId`؛ يوجد سجل واحد فقط لكل مستخدم. |
+| `marketSnapshots` | غير صالح → مجدد | يستبدل الكاش بالـ upsert مع تحديث `payload` و`fetchedAt` و`expiresAt`. |
+
+تجدر الملاحظة أن الإشعارات لا تحمل مفتاحًا خارجيًا مباشرًا إلى `metalAlerts` أو `structureAlerts`؛ المرجع إلى التنبيه يكون في `metadata.alertId`. هذا يحقق أثرًا تدقيقيًا خفيفًا، لكنه يعني أنه إذا تطلبت الميزات الجديدة انضمامات تحليلية أو تقارير متقدمة بين التنبيه والإشعار، فالأفضل إضافة عمود علائقي صريح وترحيل واضح بدل البحث داخل JSON.
+
+### 5.8 تعليمات مخطط البيانات للنموذج الذكي
+
+```text
+لا تغيّر مخطط AMIC بافتراضات عامة. ابدأ دائمًا من drizzle/schema.ts. كل بيانات المستخدم الشخصية تستخدم users.id كـ userId ومحمية في الخادم بشرط ملكية ضمن WHERE. لا تجعل userId قابلاً للثقة إذا أتى من المتصفح. استخدم DECIMAL للأسعار والكميات، وCASCADE لبيانات المستخدم الجديدة عند الحاجة، وقيود ENUM المتوافقة مع القيم الحالية.
+
+الجداول العالمية هي marketSnapshots وaiProviderSettings وmetalAlertMonitorSettings؛ لا تضف لها userId عشوائيًا. aiProviderSettings إدارية فقط وتخزن API key مشفرًا؛ لا تعيد encryptedApiKey أو تفكه في العميل. userTelegramSettings وchartPreferences هما سجل واحد لكل مستخدم باستخدام userId كمفتاح أساسي وupsert.
+
+قبل أي تغيير بنيوي: عدّل drizzle/schema.ts، أنشئ migration، راجع SQL، وطبقه عبر أداة SQL المخصصة. حدّث helpers الخادمية واختبارات Vitest، ولا تضف جدولًا أو عمودًا دون تبرير علاقة وملكية وفهرس واستراتيجية حذف واضحة.
+```
+
+## 6. نموذج البيانات ومفردات المجال
 
 استخدم المفردات التالية باستمرار عند مناقشة المشروع أو كتابة الكود:
 
@@ -93,7 +255,7 @@
 | Chart preferences | إعدادات طبقات الشارت المحفوظة لكل مستخدم. |
 | Paper trade | صفقة محاكاة لا تنفذ أمرًا حقيقيًا لدى وسيط. |
 
-## 6. تعليمات جاهزة للنموذج الذكي
+## 7. تعليمات جاهزة للنموذج الذكي
 
 انسخ النص التالي عند بدء محادثة مع نموذج ذكاء اصطناعي حول هذا المشروع:
 
@@ -109,7 +271,7 @@
 حافظ على الأمان: لا تسرّب مفاتيح API أو JWT أو كلمات المرور، ولا تستخدم قيمة افتراضية لـ JWT_SECRET. لا تصطنع أسعارًا أو شموعًا أو تقييمات أو مخرجات استثمارية. أي اقتراح أو تنفيذ يجب أن يحافظ على واجهة عربية RTL متجاوبة، وعلى إفصاح أن التحليل معلوماتي وتعليمي وليس نصيحة استثمارية. أضف اختبارات Vitest لكل تغيير سلوكي، وشغّل فحص TypeScript وبناء الإنتاج قبل اعتبار التغيير مكتملًا.
 ```
 
-## 7. وضع المشروع الحالي
+## 8. وضع المشروع الحالي
 
 المنصة تعمل على خادم دائم عبر HTTPS، وتستخدم قاعدة TiDB Cloud. شارة مزود البث منشورة ومختبرة لحالات الاتصال والتأخر وإعادة الاتصال والاحتياط وعدم الإتاحة. مفتاح Twelve Data مفعّل في إعداد إنتاجي محمي، وقد تحقق عرض شموع **XAUUSD/FX** في الواجهة تحت تسمية **«الشموع: Twelve Data مرخّص»** بعد إعادة إنشاء الحاوية.
 
