@@ -9,8 +9,10 @@ import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences, type ChartLayerPr
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
 import { getChartOverlayDensity } from "@/lib/chartOverlayDensity";
+import { isChartFullscreenTarget, requestChartFullscreen, type ChartFullscreenMode } from "@/lib/chartFullscreen";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import { calculateConfluenceIct, type ConfluenceIctSettings } from "@shared/confluenceIct";
+import { Maximize2, Minimize2 } from "lucide-react";
 import {
   CandlestickSeries,
   createSeriesMarkers,
@@ -130,6 +132,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [chartWidth, setChartWidth] = useState(0);
   const [settledChartWidth, setSettledChartWidth] = useState(0);
+  const [isChartFullscreen, setIsChartFullscreen] = useState(false);
+  const [chartFullscreenMode, setChartFullscreenMode] = useState<ChartFullscreenMode | null>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => setSettledChartWidth(chartWidth), 150);
     return () => window.clearTimeout(timer);
@@ -155,6 +159,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     [chartCandles],
   );
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartFullscreenRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const overlaysRef = useRef<OverlaySeries | null>(null);
@@ -182,6 +187,46 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   useEffect(() => {
     onCrossoverChange?.(latestCrossover, interval);
   }, [interval, latestCrossover, onCrossoverChange]);
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      const ownsFullscreen = isChartFullscreenTarget(chartFullscreenRef.current, document.fullscreenElement);
+      setIsChartFullscreen(ownsFullscreen);
+      if (!ownsFullscreen) setChartFullscreenMode(null);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
+
+  useEffect(() => {
+    if (!isChartFullscreen) return;
+    const priorOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = priorOverflow; };
+  }, [isChartFullscreen]);
+
+  useEffect(() => {
+    if (!isChartFullscreen || chartFullscreenMode !== "fallback") return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsChartFullscreen(false);
+        setChartFullscreenMode(null);
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [chartFullscreenMode, isChartFullscreen]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const container = containerRef.current;
+      const chart = chartRef.current;
+      if (!container || !chart) return;
+      chart.applyOptions({ width: container.clientWidth, height: getChartViewportHeight(container.clientHeight) });
+      chart.timeScale().fitContent();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isChartFullscreen]);
 
   useEffect(() => {
     setLiveCandle(null);
@@ -528,10 +573,26 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   };
   const liveProvider = exchange.toUpperCase() === "BINANCE" ? "binance" : "twelve-data";
   const livePresentation = describeLiveProviderStatus(liveStatus, liveProvider);
+  const toggleChartFullscreen = async () => {
+    const target = chartFullscreenRef.current;
+    if (!target) return;
+    if (isChartFullscreen) {
+      if (isChartFullscreenTarget(target, document.fullscreenElement) && typeof document.exitFullscreen === "function") {
+        await document.exitFullscreen().catch(() => undefined);
+      }
+      setIsChartFullscreen(false);
+      setChartFullscreenMode(null);
+      return;
+    }
+    const mode = await requestChartFullscreen(target);
+    setChartFullscreenMode(mode);
+    setIsChartFullscreen(true);
+  };
 
   return (
     <Card className="bg-white/[0.02]">
       <CardContent className="pt-4 sm:pt-5">
+        <div ref={chartFullscreenRef} className={isChartFullscreen ? "fixed inset-0 z-[100] flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-[#050910] p-3 sm:p-5" : ""}>
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <p className="text-xs font-semibold tracking-[0.13em] text-primary">PRICE HISTORY</p>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-1">
@@ -572,6 +633,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <button type="button" onClick={() => setShowConfluenceSettings(open => !open)} className="min-h-10 rounded-lg border border-primary/25 bg-primary/[0.08] px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/[0.14]">
               {showConfluenceSettings ? "إخفاء إعدادات ICT" : "إعدادات ICT"}
             </button>
+            <button type="button" onClick={() => void toggleChartFullscreen()} aria-label={isChartFullscreen ? "الخروج من ملء شاشة المخطط" : "عرض المخطط بملء الشاشة"} title={isChartFullscreen ? "الخروج من ملء الشاشة" : "ملء الشاشة"} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 text-xs font-medium text-foreground transition-colors hover:bg-white/[0.09]">
+              {isChartFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}<span className="sm:hidden">{isChartFullscreen ? "خروج" : "ملء الشاشة"}</span>
+            </button>
             <span className="self-center text-[10px] text-muted-foreground">
               {chartPreferencesQuery.isLoading ? "تحميل الطبقات…" : saveChartPreferences.isPending ? "حفظ الطبقات…" : "تفضيلاتك محفوظة"}
             </span>
@@ -589,7 +653,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.requireFvg} onChange={event => updateConfluenceSetting("requireFvg", event.target.checked)} /><span>اشتراط FVG</span></label>
           </div>
         ) : null}
-        <div className="relative h-[300px] min-h-[220px] overflow-hidden rounded-xl sm:h-[380px]">
+        <div className={`relative overflow-hidden rounded-xl ${isChartFullscreen ? "min-h-0 flex-1" : "h-[300px] min-h-[220px] sm:h-[380px]"}`}>
           <div ref={containerRef} className="h-full w-full" />
           {candlesQuery.isLoading && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/45 backdrop-blur-[2px]">
@@ -608,6 +672,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
               <p className="max-w-xs px-4 text-center text-sm text-muted-foreground">لا تتوفر سلسلة شموع تاريخية لهذا الرمز في النطاق المحدد. لن تُعرض شمعة بث منفردة حتى يكتمل التاريخ.</p>
             </div>
           )}
+        </div>
         </div>
         {preferences.confluenceIct.enabled && preferences.confluenceIct.summary ? (
           <div className="mt-3 grid gap-2 rounded-xl border border-primary/20 bg-primary/[0.05] p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
