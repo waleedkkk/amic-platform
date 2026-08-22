@@ -9,7 +9,7 @@ import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences, type ChartLayerPr
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
 import { getChartOverlayDensity } from "@/lib/chartOverlayDensity";
-import { isChartFullscreenTarget, requestChartFullscreen, type ChartFullscreenMode } from "@/lib/chartFullscreen";
+import { getChartFullscreenPortalContainer, isChartFullscreenTarget, requestChartFullscreen, type ChartFullscreenMode } from "@/lib/chartFullscreen";
 import { countEnabledIctLayers, ICT_LAYER_CONTROLS } from "@/lib/chartMobileControls";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -630,7 +630,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                   <SlidersHorizontal className="size-4 text-primary" /> الطبقات <span className="font-mono text-primary">{enabledIctLayerCount}/6</span>
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-60 border-white/[0.12] bg-[#0a111b] p-1.5 text-foreground">
+              <DropdownMenuContent portalContainer={getChartFullscreenPortalContainer(isChartFullscreen, chartFullscreenRef.current)} align="end" className="z-[110] w-60 border-white/[0.12] bg-[#0a111b] p-1.5 text-foreground">
                 <DropdownMenuLabel className="text-xs text-muted-foreground">طبقات ICT</DropdownMenuLabel>
                 {ICT_LAYER_CONTROLS.map(control => (
                   <DropdownMenuCheckboxItem

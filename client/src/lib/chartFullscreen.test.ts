@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isChartFullscreenTarget, requestChartFullscreen } from "./chartFullscreen";
+import { getChartFullscreenPortalContainer, isChartFullscreenTarget, requestChartFullscreen } from "./chartFullscreen";
 
 describe("وضع ملء شاشة المخطط", () => {
   it("يستخدم وضع المتصفح الأصلي عندما يتوفر وينجح", async () => {
@@ -18,5 +18,11 @@ describe("وضع ملء شاشة المخطط", () => {
     expect(isChartFullscreenTarget(target, target)).toBe(true);
     expect(isChartFullscreenTarget(target, {} as Element)).toBe(false);
     expect(isChartFullscreenTarget(null, target)).toBe(false);
+  });
+
+  it("يركب القوائم المنبثقة داخل عنصر المخطط في وضع ملء الشاشة", () => {
+    const chart = {} as HTMLDivElement;
+    expect(getChartFullscreenPortalContainer(true, chart)).toBe(chart);
+    expect(getChartFullscreenPortalContainer(false, chart)).toBeUndefined();
   });
 });
