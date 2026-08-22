@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 const MCP_URL = process.env.MCP_SERVICE_URL ?? "http://tradingview-mcp:8000/mcp";
 const MCP_TIMEOUT_MS = 20_000;
+const MCP_MAX_ATTEMPTS = 2;
 
 export const TRADINGVIEW_TOOL_NAMES = [
   "top_gainers",
@@ -162,15 +163,21 @@ export async function closeTradingViewMcpConnection() {
 }
 
 async function withMcpClient<T>(handler: (client: Client) => Promise<T>): Promise<T> {
-  let connection: McpConnection;
-  try {
-    connection = await getConnection();
-    return await withTimeout(handler(connection.client), "طلب TradingView MCP");
-  } catch (cause) {
-    if (connection!) await invalidateConnection(connection);
-    const reason = cause instanceof Error ? cause.message : "فشل غير معروف";
-    throw new Error(`تعذر تنفيذ طلب TradingView MCP: ${reason}. تحقق من جاهزية مزود التحليل أو بنية استجابته.`);
+  let lastCause: unknown;
+
+  for (let attempt = 1; attempt <= MCP_MAX_ATTEMPTS; attempt += 1) {
+    let connection: McpConnection | null = null;
+    try {
+      connection = await getConnection();
+      return await withTimeout(handler(connection.client), "طلب TradingView MCP");
+    } catch (cause) {
+      lastCause = cause;
+      if (connection) await invalidateConnection(connection);
+    }
   }
+
+  const reason = lastCause instanceof Error ? lastCause.message : "فشل غير معروف";
+  throw new Error(`تعذر تنفيذ طلب TradingView MCP بعد محاولة إعادة اتصال واحدة: ${reason}. تحقق من جاهزية مزود التحليل أو بنية استجابته.`);
 }
 
 export async function listTradingViewTools(): Promise<MCPToolDescription[]> {
