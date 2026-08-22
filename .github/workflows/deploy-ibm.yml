@@ -1,6 +1,8 @@
 name: Verify and deploy AMIC to IBM
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
