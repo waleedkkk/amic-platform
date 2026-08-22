@@ -255,7 +255,104 @@ erDiagram
 | Chart preferences | إعدادات طبقات الشارت المحفوظة لكل مستخدم. |
 | Paper trade | صفقة محاكاة لا تنفذ أمرًا حقيقيًا لدى وسيط. |
 
-## 7. تعليمات جاهزة للنموذج الذكي
+## 7. الرسم المعماري والبنية التحتية
+
+يوضح الرسم التالي مسارات البيانات الفعلية في AMIC. توجد نقطة دخول عامة واحدة عبر نطاق DuckDNS وطبقة Caddy؛ أما خدمة `tradingview-mcp` فلا تملك منفذًا عامًا وتبقى ضمن شبكة Docker الداخلية. لا يجب أن يغيّر أي اقتراح مستقبلي هذا الحد أو يعرض MCP أو قاعدة البيانات مباشرة للإنترنت.
+
+```mermaid
+flowchart TB
+    user["المستخدم<br/>متصفح عربي RTL"]
+
+    subgraph edge["الحافة العامة"]
+        direction TB
+        caddy["amic.duckdns.org<br/>Caddy: HTTPS/TLS و Reverse Proxy"]
+    end
+
+    subgraph ibm["خادم IBM الدائم — Docker Compose"]
+        direction TB
+        app["amic-app<br/>Node.js + Express + tRPC<br/>React static assets"]
+        mcp["tradingview-mcp<br/>Python · Streamable HTTP :8000<br/>شبكة amic-internal الخاصة"]
+        config["إعدادات وقت التشغيل<br/>JWT · DATABASE_URL · Twelve Data<br/>أسرار خارج المستودع"]
+    end
+
+    subgraph market["مصادر السوق الخارجية"]
+        direction TB
+        td["Twelve Data<br/>HTTPS للشموع · WSS للأسعار"]
+        yahoo["Yahoo Finance<br/>احتياط للشموع التاريخية"]
+        binance["Binance WSS<br/>عملات مشفّرة مدعومة فقط"]
+    end
+
+    subgraph managed["الخدمات المدارة والخارجية"]
+        direction TB
+        tidb["TiDB Cloud<br/>MySQL-compatible عبر TLS"]
+        tradingview["TradingView<br/>أدوات تحليل عبر MCP"]
+        llm["مزوّدو الذكاء الاصطناعي<br/>OpenAI · Anthropic · Google · OpenRouter · ZenMux"]
+        telegram["Telegram Bot API<br/>تنبيهات اختيارية"]
+        heartbeat["Heartbeat<br/>تشغيل مهام مجدولة"]
+    end
+
+    user -->|"HTTPS: واجهة، جلسة، tRPC"| caddy
+    caddy -->|"HTTP محلي إلى المنفذ 3000"| app
+    app -->|"Static React + JSON/tRPC"| caddy
+    caddy -->|"HTTPS"| user
+
+    user -.->|"WSS مباشر للشمعة الجارية"| binance
+    app -->|"HTTPS: شموع تاريخية"| td
+    app -->|"WSS خادمي مشترك: آخر سعر وحالة"| td
+    app -->|"HTTPS عند الاحتياط"| yahoo
+    app -->|"MySQL/TLS"| tidb
+    app -->|"HTTP داخلي فقط"| mcp
+    mcp -->|"طلبات أدوات تحليل"| tradingview
+    app -->|"HTTPS عند تفعيل مزوّد إداري"| llm
+    app -->|"HTTPS عند وجود تنبيه مفعّل"| telegram
+    heartbeat -->|"POST لمسار مجدول محمي"| caddy
+    config -.->|"حقن وقت التشغيل فقط"| app
+
+    classDef edge fill:#1d4ed8,color:#ffffff,stroke:#1e40af
+    classDef service fill:#14532d,color:#ffffff,stroke:#166534
+    classDef external fill:#4c1d95,color:#ffffff,stroke:#6d28d9
+    classDef private fill:#7f1d1d,color:#ffffff,stroke:#991b1b
+    class user,dns,caddy edge
+    class app service
+    class td,yahoo,binance,tradingview,llm,telegram,heartbeat,tidb external
+    class mcp,config private
+```
+
+### 7.1 طبقات التشغيل وحدود الثقة
+
+| الطبقة | المكونات | الوظيفة | الحد الأمني الذي لا يجب تجاوزه |
+|---|---|---|---|
+| العميل | React 19 و`lightweight-charts` في المتصفح | يعرض الواجهة RTL، يرسل طلبات tRPC، ويرسم الشموع والطبقات. | لا يحتفظ بمفتاح Twelve Data أو مفاتيح الذكاء الاصطناعي أو `JWT_SECRET`، ولا يقرر صلاحية المستخدم بنفسه. |
+| الحافة العامة | DuckDNS وCaddy | استقبال HTTPS، إنهاء TLS، وتمرير الطلب إلى التطبيق فقط. | لا يمرر Caddy أي طلب عام إلى قاعدة البيانات أو إلى خدمة MCP. |
+| التطبيق | `amic-app`، Express، tRPC، Drizzle | المصادقة، فرض الدور والملكية، منطق السوق، إدارة التنبيهات، تقديم الأصول الثابتة، واستدعاء الخدمات الخارجية. | جميع عمليات البيانات الشخصية تستخدم هوية الجلسة الخادمية، لا `userId` القادم من العميل. |
+| الشبكة الخاصة | `amic-internal` و`tradingview-mcp` | تمكين Node.js من استدعاء أدوات TradingView عبر MCP. | لا يوجد نشر للمنفذ `8000` نحو الإنترنت؛ لا يتصل العميل مباشرة بـ MCP. |
+| البيانات | TiDB Cloud | تخزين الهوية، الإعدادات، التنبيهات، الصفقات الورقية، الكاش، وسجل الإشعارات. | الاتصال من التطبيق فقط وبـ TLS؛ لا ترسل بيانات مستخدم إلى مزودي السوق أو الذكاء الاصطناعي إلا عند الحاجة المقصودة. |
+| الخدمات الخارجية | Twelve Data وYahoo Finance وBinance وTradingView ومزوّدو LLM وTelegram | توفير السوق والبث والتحليل والتنبيهات والمساعدة الذكية. | عالج الفشل كحالة واضحة للمستخدم، ولا تتحول إلى بيانات مصطنعة أو تدّعِ حداثة غير متاحة. |
+| التشغيل الدوري | Heartbeat إلى مسار مجدول محمي في التطبيق | فحص تنبيهات المعادن؛ تنبيهات بنية السعر لها مراقب خادمي منفصل ضمن التطبيق. | يجب أن تبقى المسارات المجدولة محددة وصالحة ومحمية من التشغيل غير المصرح به. |
+
+### 7.2 تدفقات البيانات الرئيسة
+
+| التدفق | المسار | البروتوكول والسلوك | ملاحظة تنفيذية للنموذج الذكي |
+|---|---|---|---|
+| تسجيل الدخول والجلسة | المتصفح ← Caddy ← `amic-app` | HTTPS؛ كلمة مرور تتحقق في الخادم، ثم كوكي جلسة موقّعة. | لا تعيد OAuth، ولا تضع التوقيع أو كلمة المرور أو المفاتيح في الواجهة. |
+| الشموع التاريخية | المتصفح ← tRPC ← `amic-app` ← Twelve Data، ثم Yahoo Finance عند الحاجة | HTTPS من التطبيق إلى المزود؛ التخزين المؤقت يقلل الطلبات. | أظهر مصدر الشموع الفعلي، واعلن استخدام الاحتياط أو التأخير بدلاً من إخفائه. |
+| السعر الحي متعدد الأصول | المتصفح ← tRPC دوري ← `amic-app` ← WSS Twelve Data | الخادم يفتح الاتصال المشترك عند أول طلب للرمز، يحفظ آخر سعر، ويعيده للواجهة مع الحالة `connecting/live/reconnecting/delayed/unavailable`. | لا تفتح اتصال Twelve Data مستقلًا من كل متصفح ولا تكشف مفتاحه. |
+| التحديث الحي للكريبتو | المتصفح ← WSS Binance | بث مباشر من المتصفح لأزواج Binance المدعومة فقط، يحدّث الشمعة الجارية. | لا تعمم اسم Binance على الذهب أو الأسهم أو الفوركس. |
+| تحليل TradingView | المتصفح ← tRPC ← `amic-app` ← MCP داخلي ← TradingView | tRPC/HTTP إلى Node، ثم Streamable HTTP على شبكة Docker، ثم استدعاءات الخدمة الخارجية. | لا تستخدم TradingView كمصدر شموع الشارت ولا تكشف MCP للعامة. |
+| تنبيه مفعّل | Heartbeat أو المراقب ← `amic-app` ← TiDB، ثم إشعار داخلي/Telegram عند التفعيل | مسار مجدول يقرأ التنبيهات النشطة ويكتب النتيجة مرة واحدة لتفادي التكرار. | احفظ الملكية والسجل التدقيقي، ولا ترسل تيليغرام إن لم يفعّل المستخدم الإعداد ويحدد `chatId`. |
+| المساعد الذكي | المتصفح ← tRPC ← `amic-app` ← المزوّد النشط | مفتاح المزوّد يفك على الخادم فقط بعد أن يكون مخزنًا مشفرًا في TiDB. | حافظ على الإفصاح التعليمي، ولا تحوّل المخرجات إلى توصيات شخصية أو أوامر تداول. |
+
+### 7.3 تعليمات البنية التحتية للنموذج الذكي
+
+```text
+اعتبر Caddy بوابة HTTPS العامة الوحيدة وamic-app نقطة منطق الأعمال الوحيدة. لا تعرض TiDB أو tradingview-mcp أو ملفات الأسرار أو منافذ Docker مباشرة للإنترنت. كل تكامل خارجي يمر من الخادم ما عدا Binance WebSocket للرموز المشفرة المدعومة؛ لا تخلط هذا الاستثناء مع بقية الأصول.
+
+عند تعديل السوق أو البث، ميّز بين شموع تاريخية من Twelve Data/Yahoo، وسعر حي يمر من مدير Twelve Data الخادمي، وبث Binance المباشر في المتصفح. أظهر اسم المزود وحالة الاتصال بصدق. عند تعديل التنبيهات، حافظ على المسارات المجدولة والملكية وكتابة إشعار قابل للتدقيق دون إطلاق مكرر.
+
+لا تضع أسرارًا في Dockerfile أو JavaScript المبني أو سجلات التطوير. أبقِ tradingview-mcp على شبكة amic-internal، واستعمل الحاوية Node.js كوسيط صلاحيات وتدقيق لكل وصول إلى قاعدة البيانات أو إلى مزوّدات LLM.
+```
+
+## 8. تعليمات جاهزة للنموذج الذكي
 
 انسخ النص التالي عند بدء محادثة مع نموذج ذكاء اصطناعي حول هذا المشروع:
 
