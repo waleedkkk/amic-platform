@@ -84,6 +84,12 @@ jobs:
           IBM_USER: ${{ secrets.IBM_USER }}
         run: |
           set -euo pipefail
+          IBM_HOST=$(printf '%s' "$IBM_HOST" | tr -d '[:space:]')
+          IBM_USER=$(printf '%s' "$IBM_USER" | tr -d '[:space:]')
+          if ! [[ "$IBM_USER" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "IBM_USER must contain only letters, numbers, hyphens, or underscores" >&2
+            exit 1
+          fi
           # The IBM authorized key must force this connection to run only
           # /usr/local/bin/deploy-amic. That command fetches main and rebuilds
           # amic-app only; it must not rebuild tradingview-mcp.
