@@ -1,8 +1,10 @@
 import Decimal from "decimal.js";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertSavedSignal,
+  aiConversationMessages,
+  aiMemorySettings,
   chartPreferences,
   InsertUser,
   marketSnapshots,
@@ -170,6 +172,64 @@ export async function getMarketSnapshot(cacheKey: string) {
   const [snapshot] = await db.select().from(marketSnapshots).where(eq(marketSnapshots.cacheKey, cacheKey)).limit(1);
   if (!snapshot || snapshot.expiresAt <= new Date()) return undefined;
   return snapshot.payload;
+}
+
+const MAX_ASSISTANT_MEMORY_MESSAGES = 12;
+const MAX_STORED_ASSISTANT_MEMORY_MESSAGES = 24;
+
+export type AssistantMemoryMessage = { role: "user" | "assistant"; content: string };
+
+export async function getUserAssistantMemory(userId: number) {
+  const db = await getDb();
+  if (!db) return { enabled: false, messages: [] as AssistantMemoryMessage[] };
+
+  const [settings] = await db.select().from(aiMemorySettings).where(eq(aiMemorySettings.userId, userId)).limit(1);
+  if (!settings?.enabled) return { enabled: false, messages: [] as AssistantMemoryMessage[] };
+
+  const messages = await db
+    .select({ role: aiConversationMessages.role, content: aiConversationMessages.content })
+    .from(aiConversationMessages)
+    .where(eq(aiConversationMessages.userId, userId))
+    .orderBy(desc(aiConversationMessages.createdAt), desc(aiConversationMessages.id))
+    .limit(MAX_ASSISTANT_MEMORY_MESSAGES);
+
+  return { enabled: true, messages: messages.reverse() as AssistantMemoryMessage[] };
+}
+
+export async function setUserAssistantMemoryEnabled(userId: number, enabled: boolean) {
+  const db = await requireDb();
+  await db.insert(aiMemorySettings).values({ userId, enabled: enabled ? 1 : 0 }).onDuplicateKeyUpdate({
+    set: { enabled: enabled ? 1 : 0, updatedAt: new Date() },
+  });
+  return { enabled };
+}
+
+export async function clearUserAssistantMemory(userId: number) {
+  const db = await requireDb();
+  await db.delete(aiConversationMessages).where(eq(aiConversationMessages.userId, userId));
+  return { success: true } as const;
+}
+
+export async function appendUserAssistantMemory(userId: number, messages: AssistantMemoryMessage[]) {
+  const db = await getDb();
+  if (!db || messages.length === 0) return;
+
+  const safeMessages = messages
+    .map(message => ({ role: message.role, content: message.content.trim().slice(0, 8_000) }))
+    .filter(message => message.content.length > 0);
+  if (safeMessages.length === 0) return;
+
+  await db.insert(aiConversationMessages).values(safeMessages.map(message => ({ userId, ...message })));
+  const retained = await db
+    .select({ id: aiConversationMessages.id })
+    .from(aiConversationMessages)
+    .where(eq(aiConversationMessages.userId, userId))
+    .orderBy(desc(aiConversationMessages.createdAt), desc(aiConversationMessages.id))
+    .limit(MAX_STORED_ASSISTANT_MEMORY_MESSAGES + 1);
+  const outdatedIds = retained.slice(MAX_STORED_ASSISTANT_MEMORY_MESSAGES).map(row => row.id);
+  if (outdatedIds.length > 0) {
+    await db.delete(aiConversationMessages).where(and(eq(aiConversationMessages.userId, userId), inArray(aiConversationMessages.id, outdatedIds)));
+  }
 }
 
 export async function saveMarketSnapshot(input: {

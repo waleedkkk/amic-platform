@@ -1,8 +1,10 @@
 import { AIChatBox, Message } from "@/components/AIChatBox";
 import { consumeMarketAssistantContext, MarketAssistantContext } from "@/lib/marketAssistantContext";
 import { PageHeading, Panel } from "@/components/market-ui";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { trpc } from "@/lib/trpc";
-import { ShieldAlert, Sparkles } from "lucide-react";
+import { Gem, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -12,8 +14,21 @@ export default function AiAssistant() {
   const [messages, setMessages] = useState<Message[]>([]);
   const messagesRef = useRef<Message[]>([]);
   const marketContextRef = useRef<MarketAssistantContext | undefined>(undefined);
+  const memory = trpc.ai.memory.get.useQuery();
+  const utils = trpc.useUtils();
+  const setMemoryEnabled = trpc.ai.memory.setEnabled.useMutation({
+    onSuccess: async ({ enabled }) => {
+      await utils.ai.memory.get.invalidate();
+      toast.success(enabled ? "تم تفعيل ذاكرة المساعد لهذه الحساب." : "تم إيقاف ذاكرة المساعد. بقي السجل محفوظًا حتى تمسحه.");
+    },
+    onError: error => toast.error(error.message),
+  });
+  const clearMemory = trpc.ai.memory.clear.useMutation({
+    onSuccess: () => toast.success("تم مسح ذاكرة محادثاتك المحفوظة."),
+    onError: error => toast.error(error.message),
+  });
   const explain = trpc.ai.explain.useMutation({ onSuccess: response => setMessages(current => {
-    const next = [...current, { role: "assistant" as const, content: response.content }];
+    const next = [...current, { role: "assistant" as const, content: response.content, toolActivity: response.toolActivity }];
     messagesRef.current = next;
     return next;
   }), onError: error => toast.error(error.message) });
@@ -48,5 +63,5 @@ export default function AiAssistant() {
     requestExplanation(next, marketContext);
   }, []);
 
-  return <><PageHeading eyebrow="AMIC EXPLAINER" title="مساعد التحليل" description="حوّل تساؤلاتك ومخرجاتك الفنية إلى شرح عربي منظم. لا يستخدم المساعد لإصدار توصيات شخصية أو وعود بالعوائد." /><div className="grid gap-5 lg:grid-cols-[0.72fr_1.28fr]"><Panel className="h-fit"><Sparkles className="size-6 text-primary" /><h2 className="mt-5 text-xl font-semibold">كيف يجيب المساعد؟</h2><p className="mt-3 text-sm leading-7 text-muted-foreground">يعتمد على السؤال والسياق الذي تزوّده به، ويشرح المؤشرات واحتمالاتها وتعارض الإشارات. عند الحاجة، انقل إليه القيم الفعلية من صفحة التحليل الفني.</p><div className="mt-6 flex gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.045] p-4 text-sm leading-6 text-amber-100"><ShieldAlert className="mt-0.5 size-4 shrink-0" /><p>المحتوى تعليمي ومعلوماتي فقط، ولا يشكّل نصيحة استثمارية أو دعوة لفتح صفقة.</p></div></Panel><AIChatBox messages={messages} onSendMessage={send} isLoading={explain.isPending} height="600px" placeholder="اسأل عن RSI أو MACD أو توافق الاتجاه…" emptyStateMessage="ابدأ سؤالًا حول قراءة فنية أو سياق سوقي." suggestedPrompts={["كيف أقرأ تعارض RSI مع اتجاه السعر؟", "ما دلالة اتساع Bollinger Bands؟", "كيف أفسّر توافق 1h و4h و1D؟"]} className="border-white/[0.08] bg-card/90" /></div></>;
+  return <><PageHeading eyebrow="AMIC EXPLAINER" title="مساعد التحليل" description="حوّل تساؤلاتك ومخرجاتك الفنية إلى شرح عربي منظم. لا يستخدم المساعد لإصدار توصيات شخصية أو وعود بالعوائد." /><div className="grid gap-5 lg:grid-cols-[0.72fr_1.28fr]"><Panel className="h-fit"><Sparkles className="size-6 text-primary" /><h2 className="mt-5 text-xl font-semibold">كيف يجيب المساعد؟</h2><p className="mt-3 text-sm leading-7 text-muted-foreground">يعتمد على السؤال والسياق الذي تزوّده به، ويشرح المؤشرات واحتمالاتها وتعارض الإشارات. عند طلب بيانات حديثة يعرض أسفل الإجابة اسم الأداة والمصدر ووقت الجلب.</p><div className="mt-6 rounded-xl border border-border bg-background/35 p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold">ذاكرة المحادثة</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">اختيارية ومعزولة لحسابك. تحفظ آخر المحادثات للسياق اللاحق، ويمكنك مسحها في أي وقت.</p></div><Switch checked={memory.data?.enabled ?? false} onCheckedChange={enabled => setMemoryEnabled.mutate({ enabled })} disabled={memory.isLoading || setMemoryEnabled.isPending} aria-label="تفعيل ذاكرة المحادثة" /></div><Button variant="outline" size="sm" className="mt-3 w-full justify-start text-muted-foreground" onClick={() => clearMemory.mutate()} disabled={!memory.data?.enabled || clearMemory.isPending}><Trash2 className="ml-2 size-4" />مسح الذاكرة المحفوظة</Button></div><div className="mt-4 rounded-xl border border-border bg-background/35 p-4"><h3 className="text-sm font-semibold">تحليل سريع للمعادن</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">اطلب قراءة حديثة بنقرة واحدة، ثم راجع مصدر البيانات ووقت الجلب في النتيجة.</p><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-1"><Button variant="outline" className="justify-start" onClick={() => send("حلّل الذهب XAUUSD فنيًا على إطار 1h باستخدام بيانات حديثة من FX.")} disabled={explain.isPending}><Gem className="ml-2 size-4 text-amber-400" />تحليل الذهب</Button><Button variant="outline" className="justify-start" onClick={() => send("حلّل الفضة XAGUSD فنيًا على إطار 1h باستخدام بيانات حديثة من FX.")} disabled={explain.isPending}><Gem className="ml-2 size-4 text-slate-300" />تحليل الفضة</Button></div></div><div className="mt-6 flex gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.045] p-4 text-sm leading-6 text-amber-100"><ShieldAlert className="mt-0.5 size-4 shrink-0" /><p>المحتوى تعليمي ومعلوماتي فقط، ولا يشكّل نصيحة استثمارية أو دعوة لفتح صفقة.</p></div></Panel><AIChatBox messages={messages} onSendMessage={send} isLoading={explain.isPending} height="600px" placeholder="اسأل عن RSI أو MACD أو توافق الاتجاه…" emptyStateMessage="ابدأ سؤالًا حول قراءة فنية أو سياق سوقي." suggestedPrompts={["كيف أقرأ تعارض RSI مع اتجاه السعر؟", "ما دلالة اتساع Bollinger Bands؟", "كيف أفسّر توافق 1h و4h و1D؟"]} className="border-white/[0.08] bg-card/90" /></div></>;
 }

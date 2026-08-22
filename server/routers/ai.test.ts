@@ -5,6 +5,12 @@ import type { TrpcContext } from "../_core/context";
 const llmMocks = vi.hoisted(() => ({ invokeLLM: vi.fn() }));
 const providerMocks = vi.hoisted(() => ({ invokeConfiguredProvider: vi.fn() }));
 const mcpMocks = vi.hoisted(() => ({ callTradingViewTool: vi.fn() }));
+const memoryMocks = vi.hoisted(() => ({
+  appendUserAssistantMemory: vi.fn(),
+  clearUserAssistantMemory: vi.fn(),
+  getUserAssistantMemory: vi.fn(),
+  setUserAssistantMemoryEnabled: vi.fn(),
+}));
 
 vi.mock("../_core/llm", async importOriginal => {
   const actual = await importOriginal<typeof import("../_core/llm")>();
@@ -12,6 +18,7 @@ vi.mock("../_core/llm", async importOriginal => {
 });
 vi.mock("../aiProviderService", () => providerMocks);
 vi.mock("../mcpClient", () => mcpMocks);
+vi.mock("../db", () => memoryMocks);
 
 import { aiRouter } from "./ai";
 
@@ -47,6 +54,8 @@ describe("aiRouter.explain مع أدوات السوق", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     providerMocks.invokeConfiguredProvider.mockResolvedValue(null);
+    memoryMocks.getUserAssistantMemory.mockResolvedValue({ enabled: false, messages: [] });
+    memoryMocks.appendUserAssistantMemory.mockResolvedValue(undefined);
   });
 
   it("يعيد إجابة عادية بلا استدعاء MCP ويحافظ على سياق السوق في رسالة النظام", async () => {
@@ -56,7 +65,7 @@ describe("aiRouter.explain مع أدوات السوق", () => {
     await expect(caller.explain({
       messages: [{ role: "user", content: "لخّص السوق" }],
       marketContext: { globalSnapshot: { state: "neutral" } },
-    })).resolves.toEqual({ content: "قراءة تعليمية موجزة." });
+    })).resolves.toEqual({ content: "قراءة تعليمية موجزة.", toolActivity: [] });
 
     expect(mcpMocks.callTradingViewTool).not.toHaveBeenCalled();
     expect(llmMocks.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({
@@ -78,7 +87,10 @@ describe("aiRouter.explain مع أدوات السوق", () => {
     const caller = aiRouter.createCaller(context);
 
     await expect(caller.explain({ messages: [{ role: "user", content: "حلل BTC" }] }))
-      .resolves.toEqual({ content: "توضح القراءة توافقًا تعليميًا بين المؤشرات." });
+      .resolves.toEqual(expect.objectContaining({
+        content: "توضح القراءة توافقًا تعليميًا بين المؤشرات.",
+        toolActivity: [expect.objectContaining({ toolName: "coin_analysis", source: "TradingView MCP", fetchedAt: expect.any(String) })],
+      }));
 
     expect(mcpMocks.callTradingViewTool).toHaveBeenCalledWith("coin_analysis", {
       symbol: "BTCUSDT",
@@ -125,9 +137,47 @@ describe("aiRouter.explain مع أدوات السوق", () => {
     const caller = aiRouter.createCaller(context);
 
     await expect(caller.explain({ messages: [{ role: "user", content: "فسر RSI" }] }))
-      .resolves.toEqual({ content: "إجابة احتياطية تعليمية." });
+      .resolves.toEqual({ content: "إجابة احتياطية تعليمية.", toolActivity: [] });
 
     expect(providerMocks.invokeConfiguredProvider).toHaveBeenCalledTimes(1);
     expect(mcpMocks.callTradingViewTool).not.toHaveBeenCalled();
+  });
+
+  it("يضيف ذاكرة هذا المستخدم فقط إلى السياق ويحفظ الزوج الجديد عندما تكون مفعلة", async () => {
+    memoryMocks.getUserAssistantMemory.mockResolvedValue({
+      enabled: true,
+      messages: [
+        { role: "user", content: "أفضل القراءة متعددة الأطر." },
+        { role: "assistant", content: "سأستخدم هذا التفضيل كسياق تعليمي." },
+      ],
+    });
+    llmMocks.invokeLLM.mockResolvedValue(finalResponse("سأربط القراءة الحالية بتوافق الأطر."));
+    const caller = aiRouter.createCaller(context);
+
+    await caller.explain({ messages: [{ role: "user", content: "حلل BTC" }] });
+
+    expect(llmMocks.invokeLLM.mock.calls[0][0].messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "system", content: expect.stringContaining("سجل الذاكرة") }),
+      { role: "user", content: "أفضل القراءة متعددة الأطر." },
+      { role: "assistant", content: "سأستخدم هذا التفضيل كسياق تعليمي." },
+    ]));
+    expect(memoryMocks.appendUserAssistantMemory).toHaveBeenCalledWith(1, [
+      { role: "user", content: "حلل BTC" },
+      { role: "assistant", content: "سأربط القراءة الحالية بتوافق الأطر." },
+    ]);
+  });
+
+  it("يعزل تحكم الذاكرة ضمن المستخدم الحالي", async () => {
+    memoryMocks.getUserAssistantMemory.mockResolvedValue({ enabled: true, messages: [] });
+    memoryMocks.setUserAssistantMemoryEnabled.mockResolvedValue({ enabled: false });
+    memoryMocks.clearUserAssistantMemory.mockResolvedValue({ success: true });
+    const caller = aiRouter.createCaller(context);
+
+    await expect(caller.memory.get()).resolves.toEqual({ enabled: true });
+    await expect(caller.memory.setEnabled({ enabled: false })).resolves.toEqual({ enabled: false });
+    await expect(caller.memory.clear()).resolves.toEqual({ success: true });
+
+    expect(memoryMocks.setUserAssistantMemoryEnabled).toHaveBeenCalledWith(1, false);
+    expect(memoryMocks.clearUserAssistantMemory).toHaveBeenCalledWith(1);
   });
 });

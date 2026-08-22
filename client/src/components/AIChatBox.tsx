@@ -2,16 +2,24 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Loader2, Send, User, Sparkles } from "lucide-react";
+import { Clock3, DatabaseZap, Loader2, Send, User, Sparkles } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
 
 /**
  * Message type matching server-side LLM Message interface
  */
+export type ToolActivity = {
+  toolName: string;
+  toolLabel: string;
+  source: string;
+  fetchedAt: string;
+};
+
 export type Message = {
   role: "system" | "user" | "assistant";
   content: string;
+  toolActivity?: ToolActivity[];
 };
 
 export type AIChatBoxProps = {
@@ -261,8 +269,23 @@ export function AIChatBox({
                       )}
                     >
                       {message.role === "assistant" ? (
-                        <div className="prose prose-sm dark:prose-invert max-w-none">
-                          <Streamdown>{message.content}</Streamdown>
+                        <div className="space-y-3">
+                          <div className="prose prose-sm dark:prose-invert max-w-none">
+                            <Streamdown>{message.content}</Streamdown>
+                          </div>
+                          {message.toolActivity && message.toolActivity.length > 0 && (
+                            <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3" aria-label="مصادر بيانات التحليل">
+                              {message.toolActivity.map((activity, activityIndex) => (
+                                <div key={`${activity.toolName}-${activity.fetchedAt}-${activityIndex}`} className="inline-flex items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-[11px] leading-5 text-muted-foreground">
+                                  <DatabaseZap className="size-3 text-primary" aria-hidden="true" />
+                                  <span className="font-medium text-foreground">{activity.toolLabel}</span>
+                                  <span>· {activity.source}</span>
+                                  <Clock3 className="mr-0.5 size-3" aria-hidden="true" />
+                                  <time dateTime={activity.fetchedAt}>{new Date(activity.fetchedAt).toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <p className="whitespace-pre-wrap text-sm">

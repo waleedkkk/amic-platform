@@ -128,6 +128,26 @@ export const aiProviderSettings = mysqlTable(
   }),
 );
 
+export const aiMemorySettings = mysqlTable("aiMemorySettings", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  enabled: int("enabled").default(0).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const aiConversationMessages = mysqlTable(
+  "aiConversationMessages",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    role: mysqlEnum("role", ["user", "assistant"]).notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userCreatedLookup: index("ai_conversation_messages_user_created_idx").on(table.userId, table.createdAt),
+  }),
+);
+
 export const metalAlerts = mysqlTable(
   "metalAlerts",
   {
@@ -218,6 +238,7 @@ export type InsertPaperTrade = typeof paperTrades.$inferInsert;
 export type SavedSignal = typeof savedSignals.$inferSelect;
 export type InsertSavedSignal = typeof savedSignals.$inferInsert;
 export type AiProviderSetting = typeof aiProviderSettings.$inferSelect;
+export type AiConversationMessage = typeof aiConversationMessages.$inferSelect;
 export type MetalAlert = typeof metalAlerts.$inferSelect;
 export type StructureAlert = typeof structureAlerts.$inferSelect;
 export type UserNotification = typeof userNotifications.$inferSelect;
