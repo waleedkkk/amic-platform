@@ -5,6 +5,7 @@ import { callTradingViewTool, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } fro
 import { getTwelveDataLiveQuote } from "../twelveDataStream";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences } from "../../shared/chartPreferences";
+import { normalizeMultiTimeframeAnalysis, normalizeTechnicalAnalysis } from "../technicalAnalysis";
 
 const timeframe = z.enum(["5m", "15m", "1h", "4h", "1D", "1W", "1M"]);
 const candleInterval = z.enum(["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"]);
@@ -189,12 +190,12 @@ export const marketRouter = router({
     .input(z.object({ symbol: z.string().min(1).max(32), exchange: z.string().min(1).max(32), timeframe }))
     .query(({ input }) =>
       cached(
-        `analysis:${input.exchange}:${input.symbol}:${input.timeframe}`,
+        `analysis:v2:${input.exchange}:${input.symbol}:${input.timeframe}`,
         "analysis",
         input.exchange,
         input.timeframe,
         45,
-        () => callTradingViewTool("coin_analysis", input),
+        async () => normalizeTechnicalAnalysis(await callTradingViewTool("coin_analysis", input), input),
       ),
     ),
 
@@ -202,12 +203,12 @@ export const marketRouter = router({
     .input(z.object({ symbol: z.string().min(1).max(32), exchange: z.string().min(1).max(32) }))
     .query(({ input }) =>
       cached(
-        `multi:${input.exchange}:${input.symbol}`,
+        `multi:v2:${input.exchange}:${input.symbol}`,
         "analysis",
         input.exchange,
         "MULTI",
         90,
-        () => callTradingViewTool("multi_timeframe_analysis", input),
+        async () => normalizeMultiTimeframeAnalysis(await callTradingViewTool("multi_timeframe_analysis", input), input),
       ),
     ),
 

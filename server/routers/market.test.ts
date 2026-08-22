@@ -34,35 +34,44 @@ describe("marketRouter.analysis", () => {
   });
 
   it("يعيد النتيجة المخزنة ولا يستدعي موفر السوق عندما تكون صالحة", async () => {
-    databaseMocks.getMarketSnapshot.mockResolvedValue({ signal: "neutral" });
+    databaseMocks.getMarketSnapshot.mockResolvedValue({ schemaVersion: 1, recommendation: { signal: "neutral" } });
     const caller = marketRouter.createCaller(publicContext);
 
     const result = await caller.analysis({ symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "1h" });
 
-    expect(result).toEqual({ signal: "neutral" });
-    expect(databaseMocks.getMarketSnapshot).toHaveBeenCalledWith("analysis:BINANCE:BTCUSDT:1h");
+    expect(result).toEqual({ schemaVersion: 1, recommendation: { signal: "neutral" } });
+    expect(databaseMocks.getMarketSnapshot).toHaveBeenCalledWith("analysis:v2:BINANCE:BTCUSDT:1h");
     expect(mcpMocks.callTradingViewTool).not.toHaveBeenCalled();
   });
 
   it("يطلب التحليل ويحفظه مؤقتًا عند غياب النتيجة المخزنة", async () => {
     databaseMocks.getMarketSnapshot.mockResolvedValue(undefined);
     databaseMocks.saveMarketSnapshot.mockResolvedValue(undefined);
-    mcpMocks.callTradingViewTool.mockResolvedValue({ signal: "buy" });
+    mcpMocks.callTradingViewTool.mockResolvedValue({
+      price_data: { current_price: 100 },
+      market_sentiment: { buy_sell_signal: "BUY" },
+      bollinger_bands: { middle: 99 },
+    });
     const caller = marketRouter.createCaller(publicContext);
 
     const result = await caller.analysis({ symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "4h" });
 
-    expect(result).toEqual({ signal: "buy" });
+    expect(result).toMatchObject({
+      schemaVersion: 1,
+      recommendation: { signal: "buy" },
+      price: { current: 100 },
+      indicators: { bollinger: { middle: 99 } },
+    });
     expect(mcpMocks.callTradingViewTool).toHaveBeenCalledWith("coin_analysis", {
       symbol: "BTCUSDT",
       exchange: "BINANCE",
       timeframe: "4h",
     });
     expect(databaseMocks.saveMarketSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      cacheKey: "analysis:BINANCE:BTCUSDT:4h",
+      cacheKey: "analysis:v2:BINANCE:BTCUSDT:4h",
       exchange: "BINANCE",
       timeframe: "4h",
-      payload: { signal: "buy" },
+      payload: expect.objectContaining({ schemaVersion: 1, recommendation: expect.objectContaining({ signal: "buy" }) }),
     }));
   });
 });
