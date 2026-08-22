@@ -330,10 +330,10 @@ export async function getUserChartPreferences(userId: number) {
   return preferences;
 }
 
-export async function saveUserChartPreferences(userId: number, layers: Record<string, boolean>) {
+export async function saveUserChartPreferences(userId: number, preferences: Record<string, unknown>) {
   const db = await requireDb();
-  await db.insert(chartPreferences).values({ userId, layers }).onDuplicateKeyUpdate({ set: { layers, updatedAt: new Date() } });
-  return { layers };
+  await db.insert(chartPreferences).values({ userId, layers: preferences }).onDuplicateKeyUpdate({ set: { layers: preferences, updatedAt: new Date() } });
+  return { layers: preferences };
 }
 
 export async function listActiveMetalAlerts() {

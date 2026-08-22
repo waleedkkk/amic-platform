@@ -5,11 +5,12 @@ import { trpc } from "@/lib/trpc";
 import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } from "@shared/movingAverageCrossover";
 import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStructure";
 import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
-import { DEFAULT_CHART_LAYERS, normalizeChartLayers, type ChartLayerPreferences } from "@shared/chartPreferences";
+import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences, type ChartLayerPreferences, type ChartPreferences } from "@shared/chartPreferences";
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
 import { getChartOverlayDensity } from "@/lib/chartOverlayDensity";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
+import { calculateConfluenceIct, type ConfluenceIctSettings } from "@shared/confluenceIct";
 import {
   CandlestickSeries,
   createSeriesMarkers,
@@ -104,6 +105,7 @@ type StructureDecorations = {
   levelLines: IPriceLine[];
   zoneLines: IPriceLine[];
   proposalLines: IPriceLine[];
+  indicatorLines: ISeriesApi<"Line">[];
 };
 
 type ProposedRiskLevels = { stopLoss: string; takeProfit: string; stopLossSource: RiskLevelSource; takeProfitSource: RiskLevelSource };
@@ -112,7 +114,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const { symbol, exchange, onCrossoverChange, proposedRiskLevels } = props;
   const { isAuthenticated } = useAuth();
   const [interval, setInterval] = useState<ChartInterval>("1d");
-  const [visible, setVisible] = useState<ChartLayerPreferences>(DEFAULT_CHART_LAYERS);
+  const [preferences, setPreferences] = useState<ChartPreferences>(DEFAULT_CHART_PREFERENCES);
+  const [showConfluenceSettings, setShowConfluenceSettings] = useState(false);
+  const visible = preferences.layers;
   const chartPreferencesQuery = trpc.market.chartPreferences.get.useQuery(undefined, { staleTime: 60 * 60 * 1000, enabled: isAuthenticated });
   const saveChartPreferences = trpc.market.chartPreferences.save.useMutation();
   const structureAlertsQuery = trpc.structureAlerts.list.useQuery(undefined, { enabled: isAuthenticated });
@@ -142,6 +146,10 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   );
   const historicalCandles = candlesQuery.data?.candles ?? [];
   const chartCandles = useMemo(() => mergeLiveCandle(historicalCandles, liveCandle), [historicalCandles, liveCandle]);
+  const confluenceResult = useMemo(
+    () => calculateConfluenceIct(chartCandles, preferences.confluenceIct.settings),
+    [chartCandles, preferences.confluenceIct.settings],
+  );
   const latestCrossover = useMemo(
     () => findLatestSmaCrossover(chartCandles),
     [chartCandles],
@@ -150,7 +158,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const overlaysRef = useRef<OverlaySeries | null>(null);
-  const decorationsRef = useRef<StructureDecorations>({ levelLines: [], zoneLines: [], proposalLines: [] });
+  const decorationsRef = useRef<StructureDecorations>({ levelLines: [], zoneLines: [], proposalLines: [], indicatorLines: [] });
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const [hasVolume, setHasVolume] = useState(false);
   const [structureDetail, setStructureDetail] = useState<Pick<MarketStructure, "events" | "zones">>({ events: [], zones: [] });
@@ -166,10 +174,10 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   );
 
   useEffect(() => {
-    if (chartPreferencesQuery.data?.layers) {
-      setVisible(normalizeChartLayers(chartPreferencesQuery.data.layers));
+    if (chartPreferencesQuery.data) {
+      setPreferences(normalizeChartPreferences(chartPreferencesQuery.data));
     }
-  }, [chartPreferencesQuery.data?.layers]);
+  }, [chartPreferencesQuery.data]);
 
   useEffect(() => {
     onCrossoverChange?.(latestCrossover, interval);
@@ -292,7 +300,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       candleSeriesRef.current = null;
       overlaysRef.current = null;
       markersRef.current = null;
-      decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [] };
+      decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [], indicatorLines: [] };
     };
   }, []);
 
@@ -339,6 +347,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
 
     const lookback = Math.min(55, data.length);
     const fallbackLevels = findLevels(data, lookback);
+    const confluence = preferences.confluenceIct;
     const structure = analyzeMarketStructure(
       data.map(candle => ({
         time: Number(candle.time),
@@ -361,9 +370,10 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     clearLines(decorationsRef.current.levelLines);
     clearLines(decorationsRef.current.zoneLines);
     clearLines(decorationsRef.current.proposalLines);
-    decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [] };
+    decorationsRef.current.indicatorLines.forEach(series => chart.removeSeries(series));
+    decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [], indicatorLines: [] };
 
-    if (visible.levels) {
+    if (!confluence.enabled && visible.levels) {
       decorationsRef.current.levelLines = structure.levels.slice(-overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
         price: level.price,
         color: level.kind === "support" ? "rgba(22,163,74,0.46)" : "rgba(220,38,38,0.46)",
@@ -391,7 +401,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       ]);
     }
 
-    if (visible.zones) {
+    if (!confluence.enabled && visible.zones) {
       decorationsRef.current.zoneLines = structure.zones.slice(-overlayDensity.zoneLimit).flatMap(zone => [
         candlesSeries.createPriceLine({
           price: zone.high,
@@ -411,7 +421,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       ]);
     }
 
-    const markers: SeriesMarker<Time>[] = visible.events
+    const markers: SeriesMarker<Time>[] = !confluence.enabled && visible.events
       ? structure.events.map(event => ({
         time: event.time as Time,
         position: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? "belowBar" : "aboveBar",
@@ -420,6 +430,57 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         text: event.kind === "bullish-breakout" ? "اختراق" : event.kind === "bearish-breakdown" ? "كسر" : "انعكاس",
       }))
       : [];
+
+    if (confluence.enabled) {
+      if (confluence.trend) {
+        decorationsRef.current.indicatorLines = confluenceResult.lines.map(line => {
+          const series = chart.addSeries(LineSeries, { color: line.color, lineWidth: line.id === "ema-slow" ? 2 : 1, priceLineVisible: false, lastValueVisible: false });
+          series.setData(line.points.map(point => ({ time: point.time as Time, value: point.value })));
+          return series;
+        });
+      }
+
+      if (confluence.liquidity) {
+        decorationsRef.current.levelLines = confluenceResult.levels.slice(-overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
+          price: level.price,
+          color: level.kind === "sell-side-liquidity" ? "rgba(34,211,238,0.62)" : "rgba(232,121,249,0.62)",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: overlayDensity.compact ? level.label : `${level.label} · سيولة`,
+        }));
+      }
+
+      if (confluence.zones) {
+        decorationsRef.current.zoneLines = confluenceResult.zones.slice(-overlayDensity.zoneLimit).flatMap(zone => {
+          const bullish = zone.direction === "bullish";
+          const color = zone.kind.endsWith("fvg") ? (bullish ? "rgba(59,130,246,0.56)" : "rgba(168,85,247,0.56)") : (bullish ? "rgba(20,184,166,0.62)" : "rgba(239,68,68,0.62)");
+          return [
+            candlesSeries.createPriceLine({ price: zone.high, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: overlayDensity.showZoneAxisLabels, title: zone.label }),
+            candlesSeries.createPriceLine({ price: zone.low, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false }),
+          ];
+        });
+      }
+
+      if (confluence.structure || confluence.signals || confluence.liquidity) {
+        const maxEvents = overlayDensity.compact ? 8 : 20;
+        const eventMarkers: SeriesMarker<Time>[] = confluenceResult.events.slice(-maxEvents).filter(event => (event.kind.includes("sweep") ? confluence.liquidity : confluence.structure)).map(event => ({
+          time: event.time as Time,
+          position: event.direction === "bullish" ? "belowBar" : "aboveBar",
+          color: event.direction === "bullish" ? "#22d3ee" : "#f472b6",
+          shape: event.direction === "bullish" ? "arrowUp" : "arrowDown",
+          text: event.label,
+        }));
+        const signalMarkers: SeriesMarker<Time>[] = confluence.signals ? confluenceResult.signals.slice(-maxEvents).map(signal => ({
+          time: signal.time as Time,
+          position: signal.direction === "bullish" ? "belowBar" : "aboveBar",
+          color: signal.direction === "bullish" ? "#22c55e" : "#ef4444",
+          shape: signal.direction === "bullish" ? "arrowUp" : "arrowDown",
+          text: signal.label,
+        })) : [];
+        markers.push(...eventMarkers, ...signalMarkers);
+      }
+    }
     const chartSignals = (savedSignalsQuery.data ?? []).filter(signal => signal.symbol === symbol.toUpperCase() && signal.exchange === exchange.toUpperCase());
     const signalMarkers: SeriesMarker<Time>[] = chartSignals.map(signal => {
       const savedAt = Math.floor(new Date(signal.createdAt).getTime() / 1000);
@@ -450,12 +511,20 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     }
 
     chart.timeScale().fitContent();
-  }, [stableKey, chartCandles, chartWidth, exchange, proposedRiskLevels, savedSignalsQuery.data, symbol, visible]);
+  }, [stableKey, chartCandles, chartWidth, confluenceResult, exchange, preferences.confluenceIct, proposedRiskLevels, savedSignalsQuery.data, symbol, visible]);
 
   const toggle = (key: keyof ChartLayerPreferences) => {
-    const next = { ...visible, [key]: !visible[key] };
-    setVisible(next);
-    saveChartPreferences.mutate({ layers: next });
+    const next = { ...preferences, layers: { ...preferences.layers, [key]: !preferences.layers[key] } };
+    setPreferences(next);
+    saveChartPreferences.mutate(next);
+  };
+  const updateConfluence = (patch: Partial<ChartPreferences["confluenceIct"]>) => {
+    const next = { ...preferences, confluenceIct: { ...preferences.confluenceIct, ...patch } };
+    setPreferences(next);
+    saveChartPreferences.mutate(next);
+  };
+  const updateConfluenceSetting = <Key extends keyof ConfluenceIctSettings>(key: Key, value: ConfluenceIctSettings[Key]) => {
+    updateConfluence({ settings: { ...preferences.confluenceIct.settings, [key]: value } });
   };
   const liveProvider = exchange.toUpperCase() === "BINANCE" ? "binance" : "twelve-data";
   const livePresentation = describeLiveProviderStatus(liveStatus, liveProvider);
@@ -481,30 +550,45 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5 sm:flex sm:items-center">
               {(
                 [
-                  { key: "sma", label: "SMA" },
-                  { key: "ema", label: "EMA" },
-                  { key: "levels", label: "دعم/مقاومة" },
-                  { key: "zones", label: "طلب/عرض" },
-                  { key: "events", label: "اختراقات" },
-                  { key: "volume", label: "الحجم" },
+                  { key: "trend", label: "EMA Trend" },
+                  { key: "structure", label: "BOS / CHoCH" },
+                  { key: "liquidity", label: "BSL / SSL" },
+                  { key: "zones", label: "OB / FVG" },
+                  { key: "signals", label: "BUY / SELL" },
+                  { key: "summary", label: "ملخص ICT" },
                 ] as const
               ).map(btn => (
                 <button
                   key={btn.key}
                   type="button"
-                  onClick={() => toggle(btn.key)}
-                  aria-pressed={visible[btn.key]}
-                  className={`min-h-10 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2.5 ${visible[btn.key] ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => updateConfluence({ [btn.key]: !preferences.confluenceIct[btn.key] })}
+                  aria-pressed={preferences.confluenceIct[btn.key]}
+                  className={`min-h-10 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2.5 ${preferences.confluenceIct[btn.key] ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   {btn.label}
                 </button>
               ))}
             </div>
+            <button type="button" onClick={() => setShowConfluenceSettings(open => !open)} className="min-h-10 rounded-lg border border-primary/25 bg-primary/[0.08] px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/[0.14]">
+              {showConfluenceSettings ? "إخفاء إعدادات ICT" : "إعدادات ICT"}
+            </button>
             <span className="self-center text-[10px] text-muted-foreground">
               {chartPreferencesQuery.isLoading ? "تحميل الطبقات…" : saveChartPreferences.isPending ? "حفظ الطبقات…" : "تفضيلاتك محفوظة"}
             </span>
           </div>
         </div>
+        {showConfluenceSettings ? (
+          <div className="mb-3 grid gap-3 rounded-xl border border-primary/15 bg-primary/[0.04] p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            <label className="grid gap-1.5"><span className="text-muted-foreground">وضع التداول</span><select value={preferences.confluenceIct.settings.mode} onChange={event => updateConfluenceSetting("mode", event.target.value as ConfluenceIctSettings["mode"])} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 text-foreground"><option value="normal">Normal</option><option value="scalping">Scalping</option></select></label>
+            <label className="grid gap-1.5"><span className="text-muted-foreground">Preset السكالبينغ</span><select value={preferences.confluenceIct.settings.preset} onChange={event => updateConfluenceSetting("preset", event.target.value as ConfluenceIctSettings["preset"])} disabled={preferences.confluenceIct.settings.mode !== "scalping"} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 text-foreground disabled:opacity-45"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="aggressive">Aggressive</option></select></label>
+            <label className="grid gap-1.5"><span className="text-muted-foreground">Swing Length</span><input type="number" min="2" max="20" value={preferences.confluenceIct.settings.swingLength} onChange={event => updateConfluenceSetting("swingLength", Number(event.target.value))} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground" /></label>
+            <label className="grid gap-1.5"><span className="text-muted-foreground">FVG / ATR</span><input type="number" min="0" step="0.05" value={preferences.confluenceIct.settings.atrFvgMin} onChange={event => updateConfluenceSetting("atrFvgMin", Number(event.target.value))} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground" /></label>
+            <label className="grid gap-1.5"><span className="text-muted-foreground">OB Lookback</span><input type="number" min="2" max="50" value={preferences.confluenceIct.settings.obLookback} onChange={event => updateConfluenceSetting("obLookback", Number(event.target.value))} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground" /></label>
+            <label className="grid gap-1.5"><span className="text-muted-foreground">Liquidity tolerance %</span><input type="number" min="0.01" step="0.01" value={preferences.confluenceIct.settings.liquidityTolerancePercent} onChange={event => updateConfluenceSetting("liquidityTolerancePercent", Number(event.target.value))} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground" /></label>
+            <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.requireSweep} onChange={event => updateConfluenceSetting("requireSweep", event.target.checked)} /><span>اشتراط Sweep</span></label>
+            <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.requireFvg} onChange={event => updateConfluenceSetting("requireFvg", event.target.checked)} /><span>اشتراط FVG</span></label>
+          </div>
+        ) : null}
         <div className="relative h-[300px] min-h-[220px] overflow-hidden rounded-xl sm:h-[380px]">
           <div ref={containerRef} className="h-full w-full" />
           {candlesQuery.isLoading && (
@@ -525,6 +609,14 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             </div>
           )}
         </div>
+        {preferences.confluenceIct.enabled && preferences.confluenceIct.summary ? (
+          <div className="mt-3 grid gap-2 rounded-xl border border-primary/20 bg-primary/[0.05] p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            <div><p className="text-muted-foreground">اتجاه ICT</p><p className={`mt-1 font-semibold ${confluenceResult.summary.trend === "bullish" ? "text-emerald-300" : confluenceResult.summary.trend === "bearish" ? "text-rose-300" : "text-muted-foreground"}`}>{confluenceResult.summary.trend === "bullish" ? "صاعد" : confluenceResult.summary.trend === "bearish" ? "هابط" : "محايد"}</p></div>
+            <div><p className="text-muted-foreground">Confluence</p><p className="mt-1 font-mono">شراء {confluenceResult.summary.confluence.bull}/{confluenceResult.summary.confluence.max} · بيع {confluenceResult.summary.confluence.bear}/{confluenceResult.summary.confluence.max}</p></div>
+            <div><p className="text-muted-foreground">ICT Score</p><p className="mt-1 font-mono text-primary">Bull {confluenceResult.summary.ict.bull}/10 · Bear {confluenceResult.summary.ict.bear}/10</p></div>
+            <div><p className="text-muted-foreground">الحالة</p><p className={`mt-1 font-semibold ${confluenceResult.summary.signal === "BUY" ? "text-emerald-300" : confluenceResult.summary.signal === "SELL" ? "text-rose-300" : "text-muted-foreground"}`}>{confluenceResult.summary.signal} {confluenceResult.summary.reasons.length ? `· ${confluenceResult.summary.reasons.join(" + ")}` : "· انتظار اكتمال التلاقي"}</p></div>
+          </div>
+        ) : null}
         {latestCrossover ? (
           <div className={`mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-xs ${latestCrossover.kind === "golden" ? "border-emerald-400/25 bg-emerald-400/[0.07] text-emerald-200" : "border-rose-400/25 bg-rose-400/[0.07] text-rose-200"}`}>
             <span className="font-semibold">{latestCrossover.kind === "golden" ? "التقاطع الذهبي" : "تقاطع الموت"} <span className="font-normal opacity-80">— SMA 20 / SMA 50</span></span>
@@ -542,16 +634,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
               <span className="font-mono text-muted-foreground">
                 الشموع: {candlesQuery.data.provider === "twelve-data" ? "Twelve Data مرخّص" : "Yahoo Finance احتياطي"}
               </span>
-              {visible.sma && <span className="font-mono text-amber-400/80">━ SMA 20 ━ SMA 50</span>}
-              {visible.ema && <span className="font-mono text-sky-400/80">╌ EMA 12 ┅ EMA 26</span>}
-              {visible.levels && (
-                <>
-                  <span className="font-mono text-green-500/80">┅ دعم بنيوي</span>
-                  <span className="font-mono text-red-400/80">┅ مقاومة بنيوية</span>
-                </>
-              )}
-              {visible.zones && <span className="font-mono text-emerald-300/80">┈ مناطق طلب/عرض مؤكدة</span>}
-              {visible.events && <span className="font-mono text-violet-300/80">↑↓ اختراقات بإغلاق الشمعة</span>}
+              {preferences.confluenceIct.enabled ? <><span className="font-mono text-amber-300">━ EMA ICT</span><span className="font-mono text-cyan-300">┅ BSL / SSL</span><span className="font-mono text-violet-300">┈ OB / FVG</span><span className="font-mono text-emerald-300">↑↓ BOS / CHoCH / Sweep</span></> : null}
               {visible.volume && hasVolume && <span className="font-mono text-sky-300/80">▪ الحجم</span>}
               {candlesQuery.data.regularMarketPrice != null ? (
                 <span className="font-mono text-sky-300">
@@ -562,7 +645,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             </>
           ) : null}
         </div>
-        {(visible.events || visible.zones) && (structureDetail.events.length > 0 || structureDetail.zones.length > 0) ? (
+        {!preferences.confluenceIct.enabled && (visible.events || visible.zones) && (structureDetail.events.length > 0 || structureDetail.zones.length > 0) ? (
           <div className="mt-3 grid gap-2 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs sm:grid-cols-2">
             {visible.events && structureDetail.events.length > 0 ? (
               <div className="min-w-0">
@@ -590,7 +673,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             ) : null}
           </div>
         ) : null}
-        <div className="mt-3 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs">
+        {!preferences.confluenceIct.enabled ? <div className="mt-3 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-semibold text-foreground">تنبيهات بنية السعر</p>
@@ -613,7 +696,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
           ) : <p className="mt-2 text-amber-300">تدعم التنبيهات حاليًا أطر 5m و15m و1h و1d و1w. اختر إطارًا مدعومًا لإضافة تنبيه.</p>}
           {activeStructureAlerts.length > 0 ? <div className="mt-2 flex flex-wrap gap-1.5">{activeStructureAlerts.map(alert => <button key={alert.id} type="button" onClick={() => cancelStructureAlert.mutate({ id: alert.id })} disabled={cancelStructureAlert.isPending} className="rounded-md border border-rose-400/20 bg-rose-400/[0.06] px-2 py-1 text-rose-200 transition-colors hover:bg-rose-400/[0.12]">إلغاء {alert.eventType === "breakout" ? "الاختراق" : alert.eventType === "breakdown" ? "الكسر" : alert.eventType === "bullish_reversal" ? "الانعكاس الصاعد" : "الانعكاس الهابط"} · {alert.interval}</button>)}</div> : null}
           {createStructureAlert.isError || cancelStructureAlert.isError ? <p className="mt-2 text-destructive">تعذّر تحديث التنبيه. أعد المحاولة.</p> : null}
-        </div>
+        </div> : null}
       </CardContent>
     </Card>
   );

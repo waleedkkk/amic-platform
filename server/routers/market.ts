@@ -4,7 +4,7 @@ import { getMarketSnapshot, getUserChartPreferences, saveMarketSnapshot, saveUse
 import { callTradingViewTool, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
 import { getTwelveDataLiveQuote } from "../twelveDataStream";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { DEFAULT_CHART_LAYERS, normalizeChartLayers } from "../../shared/chartPreferences";
+import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences } from "../../shared/chartPreferences";
 
 const timeframe = z.enum(["5m", "15m", "1h", "4h", "1D", "1W", "1M"]);
 const candleInterval = z.enum(["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"]);
@@ -17,6 +17,19 @@ const chartLayers = z.object({
   zones: z.boolean(),
   events: z.boolean(),
   volume: z.boolean(),
+});
+const chartPreferencesInput = z.object({
+  layers: chartLayers,
+  confluenceIct: z.object({
+    enabled: z.boolean(),
+    trend: z.boolean(),
+    structure: z.boolean(),
+    liquidity: z.boolean(),
+    zones: z.boolean(),
+    signals: z.boolean(),
+    summary: z.boolean(),
+    settings: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+  }),
 });
 export type SparklineRange = z.infer<typeof sparklineRange>;
 
@@ -235,10 +248,10 @@ export const marketRouter = router({
   chartPreferences: router({
     get: protectedProcedure.query(async ({ ctx }) => {
       const preferences = await getUserChartPreferences(ctx.user.id);
-      return { layers: normalizeChartLayers(preferences?.layers ?? DEFAULT_CHART_LAYERS) };
+      return normalizeChartPreferences(preferences?.layers ?? DEFAULT_CHART_PREFERENCES);
     }),
     save: protectedProcedure
-      .input(z.object({ layers: chartLayers }))
-      .mutation(({ ctx, input }) => saveUserChartPreferences(ctx.user.id, input.layers)),
+      .input(chartPreferencesInput)
+      .mutation(({ ctx, input }) => saveUserChartPreferences(ctx.user.id, input)),
   }),
 });

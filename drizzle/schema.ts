@@ -220,7 +220,7 @@ export const userTelegramSettings = mysqlTable(
 
 export const chartPreferences = mysqlTable("chartPreferences", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
-  layers: json("layers").notNull(),
+  layers: json("layers").$type<Record<string, unknown>>().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
