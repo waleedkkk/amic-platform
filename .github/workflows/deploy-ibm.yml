@@ -32,6 +32,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run tests
+        env:
+          JWT_SECRET: ci-test-session-secret-not-for-production
         run: pnpm test
 
       - name: Check TypeScript
