@@ -1,0 +1,100 @@
+name: Verify and deploy AMIC to IBM
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: amic-production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Check TypeScript
+        run: pnpm check
+
+      - name: Build production bundle
+        run: pnpm build
+
+  deploy:
+    name: Deploy verified main to IBM
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Validate required deployment secrets
+        shell: bash
+        env:
+          IBM_HOST: ${{ secrets.IBM_HOST }}
+          IBM_USER: ${{ secrets.IBM_USER }}
+          IBM_SSH_PRIVATE_KEY: ${{ secrets.IBM_SSH_PRIVATE_KEY }}
+          IBM_KNOWN_HOSTS: ${{ secrets.IBM_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          for secret_name in IBM_HOST IBM_USER IBM_SSH_PRIVATE_KEY IBM_KNOWN_HOSTS; do
+            if [ -z "${!secret_name}" ]; then
+              echo "Required deployment secret is missing: ${secret_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure restricted SSH connection
+        shell: bash
+        env:
+          IBM_SSH_PRIVATE_KEY: ${{ secrets.IBM_SSH_PRIVATE_KEY }}
+          IBM_KNOWN_HOSTS: ${{ secrets.IBM_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$IBM_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$IBM_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Trigger the restricted server-side deployment
+        shell: bash
+        env:
+          IBM_HOST: ${{ secrets.IBM_HOST }}
+          IBM_USER: ${{ secrets.IBM_USER }}
+        run: |
+          set -euo pipefail
+          # The IBM authorized key must force this connection to run only
+          # /usr/local/bin/deploy-amic. That command fetches main and rebuilds
+          # amic-app only; it must not rebuild tradingview-mcp.
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$IBM_USER@$IBM_HOST"
+
+      - name: Confirm public application availability
+        run: |
+          curl --fail --show-error --silent \
+            --retry 12 --retry-delay 5 --retry-all-errors \
+            https://amic.duckdns.org/analysis > /dev/null
