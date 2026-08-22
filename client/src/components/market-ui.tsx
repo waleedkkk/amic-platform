@@ -6,8 +6,6 @@ import { Link } from "wouter";
 
 export type RecordValue = Record<string, unknown>;
 
-export const BOLLINGER_VALUE_CANDIDATES = ["bollinger", "bollinger_bands", "bollingerBands", "BB", "bbw"];
-
 export function safeRecord(value: unknown): RecordValue {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as RecordValue) : {};
 }
@@ -17,32 +15,6 @@ export function asRows(value: unknown): RecordValue[] {
   const record = safeRecord(value);
   const nested = Object.values(record).find(Array.isArray);
   return Array.isArray(nested) ? nested.map(safeRecord).filter(row => Object.keys(row).length > 0) : [];
-}
-
-export function findValue(value: unknown, candidates: string[], depth = 0): unknown {
-  if (depth > 4 || !value || typeof value !== "object") return undefined;
-  const record = safeRecord(value);
-  for (const [key, candidateValue] of Object.entries(record)) {
-    if (candidates.some(candidate => key.toLowerCase() === candidate.toLowerCase())) {
-      if (candidateValue && typeof candidateValue === "object" && !Array.isArray(candidateValue)) {
-        const nested = safeRecord(candidateValue);
-        for (const preferred of [
-          "value", "close", "current_price", "last", "level",
-          "macd_line", "histogram", "line", "signal", "middle",
-        ]) {
-          if (preferred in nested) return nested[preferred];
-        }
-      }
-      return candidateValue;
-    }
-  }
-  for (const candidateValue of Object.values(record)) {
-    if (candidateValue && typeof candidateValue === "object") {
-      const found = findValue(candidateValue, candidates, depth + 1);
-      if (found !== undefined) return found;
-    }
-  }
-  return undefined;
 }
 
 export function formatValue(value: unknown, digits = 2) {

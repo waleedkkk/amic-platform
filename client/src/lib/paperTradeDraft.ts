@@ -11,8 +11,8 @@ export type PaperTradeDraft = {
 };
 
 type AnalysisRiskInput = {
-  supportLevels?: unknown;
-  resistanceLevels?: unknown;
+  supportLevels?: readonly number[];
+  resistanceLevels?: readonly number[];
 };
 
 export type RiskLevelSource = {
@@ -44,16 +44,8 @@ export function recommendationToSide(value: unknown): PaperTradeDraft["side"] | 
   return null;
 }
 
-function collectPriceLevels(value: unknown, depth = 0): number[] {
-  if (depth > 3 || value === null || value === undefined) return [];
-  if (typeof value === "number") return Number.isFinite(value) && value > 0 ? [value] : [];
-  if (typeof value === "string") {
-    const parsed = Number(value.replace(/,/g, "").trim());
-    return Number.isFinite(parsed) && parsed > 0 ? [parsed] : [];
-  }
-  if (Array.isArray(value)) return value.flatMap(item => collectPriceLevels(item, depth + 1));
-  if (typeof value === "object") return Object.values(value as Record<string, unknown>).flatMap(item => collectPriceLevels(item, depth + 1));
-  return [];
+function collectPriceLevels(values: readonly number[] | undefined): number[] {
+  return (values ?? []).filter(value => Number.isFinite(value) && value > 0);
 }
 
 function roundRiskLevel(value: number, entryPrice: number) {
