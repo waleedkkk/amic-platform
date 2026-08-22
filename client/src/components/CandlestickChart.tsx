@@ -108,6 +108,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const chartPreferencesQuery = trpc.market.chartPreferences.get.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
   const saveChartPreferences = trpc.market.chartPreferences.save.useMutation();
   const structureAlertsQuery = trpc.structureAlerts.list.useQuery();
+  const savedSignalsQuery = trpc.signals.list.useQuery();
   const createStructureAlert = trpc.structureAlerts.create.useMutation({ onSuccess: () => structureAlertsQuery.refetch() });
   const cancelStructureAlert = trpc.structureAlerts.cancel.useMutation({ onSuccess: () => structureAlertsQuery.refetch() });
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
@@ -377,6 +378,20 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         text: event.kind === "bullish-breakout" ? "اختراق" : event.kind === "bearish-breakdown" ? "كسر" : "انعكاس",
       }))
       : [];
+    const chartSignals = (savedSignalsQuery.data ?? []).filter(signal => signal.symbol === symbol.toUpperCase() && signal.exchange === exchange.toUpperCase());
+    const signalMarkers: SeriesMarker<Time>[] = chartSignals.map(signal => {
+      const savedAt = Math.floor(new Date(signal.createdAt).getTime() / 1000);
+      const nearest = data.reduce((best, candle) => Math.abs(Number(candle.time) - savedAt) < Math.abs(Number(best.time) - savedAt) ? candle : best, data[0]);
+      const bearish = ["sell", "strong_sell", "bearish", "short"].includes(String(signal.recommendation).toLowerCase());
+      return {
+        time: nearest.time as Time,
+        position: bearish ? "aboveBar" : "belowBar",
+        color: bearish ? "#fb7185" : "#38bdf8",
+        shape: bearish ? "arrowDown" : "arrowUp",
+        text: `إشارة محفوظة · ${signal.recommendation}`,
+      };
+    });
+    markers.push(...signalMarkers);
     markersRef.current?.setMarkers(markers);
 
     const hasVol = volumes.some(v => v > 0);
@@ -393,7 +408,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     }
 
     chart.timeScale().fitContent();
-  }, [stableKey, chartCandles, visible]);
+  }, [stableKey, chartCandles, exchange, savedSignalsQuery.data, symbol, visible]);
 
   const toggle = (key: keyof ChartLayerPreferences) => {
     const next = { ...visible, [key]: !visible[key] };

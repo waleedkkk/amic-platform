@@ -149,6 +149,23 @@ export async function closeUserPaperTrade(userId: number, tradeId: number, close
   return { id: tradeId, exitPrice: closePrice.toFixed(8), realizedPnl, closedAt };
 }
 
+export async function getUserPaperTradingSummary(userId: number) {
+  const trades = await listUserPaperTrades(userId);
+  const closedTrades = trades.filter(trade => trade.status === "closed");
+  const realizedPnl = closedTrades.reduce((total, trade) => total.plus(new Decimal(trade.realizedPnl ?? "0")), new Decimal(0));
+  const wins = closedTrades.filter(trade => new Decimal(trade.realizedPnl ?? "0").gt(0)).length;
+  const losses = closedTrades.filter(trade => new Decimal(trade.realizedPnl ?? "0").lt(0)).length;
+  return {
+    totalTrades: trades.length,
+    openTrades: trades.length - closedTrades.length,
+    closedTrades: closedTrades.length,
+    wins,
+    losses,
+    winRate: closedTrades.length ? Number(((wins / closedTrades.length) * 100).toFixed(1)) : null,
+    realizedPnl: realizedPnl.toFixed(8),
+  };
+}
+
 export async function createUserSignal(userId: number, input: Omit<InsertSavedSignal, "id" | "userId" | "createdAt">) {
   const db = await requireDb();
   const result = await db.insert(savedSignals).values({ ...input, userId });
