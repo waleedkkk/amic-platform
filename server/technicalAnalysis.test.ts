@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeMultiTimeframeAnalysis, normalizeTechnicalAnalysis } from "./technicalAnalysis";
+import { normalizeMultiTimeframeAnalysis, normalizeTechnicalAnalysis, normalizeTechnicalSignal } from "./technicalAnalysis";
 
 describe("تطبيع التحليل الفني", () => {
   it("يعزل الواجهة عن الاسم الخام bollinger_bands ويعيد عقدًا ثابتًا", () => {
@@ -48,6 +48,10 @@ describe("تطبيع التحليل الفني", () => {
 });
 
 describe("تطبيع التحليل متعدد الأطر", () => {
+  it("يعرض HOLD/NO TRADE كحالة محايدة بدلاً من فقدان الملخص", () => {
+    expect(normalizeTechnicalSignal("HOLD/NO TRADE - Timeframes conflict")).toBe("neutral");
+  });
+
   it("ينشئ قراءات أطر ثابتة وملخص توافق موحد", () => {
     const result = normalizeMultiTimeframeAnalysis({
       symbol: "BINANCE:BTCUSDT",

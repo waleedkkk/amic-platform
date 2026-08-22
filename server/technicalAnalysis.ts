@@ -57,7 +57,7 @@ export function normalizeTechnicalSignal(value: unknown): TechnicalSignal {
   if (normalized.includes("strongsell")) return "strong_sell";
   if (normalized.includes("buy") || normalized.includes("bullish") || normalized.includes("long")) return "buy";
   if (normalized.includes("sell") || normalized.includes("bearish") || normalized.includes("short")) return "sell";
-  if (normalized.includes("neutral") || normalized.includes("sideways")) return "neutral";
+  if (normalized.includes("neutral") || normalized.includes("sideways") || normalized.includes("hold") || normalized.includes("notrade") || normalized.includes("wait")) return "neutral";
   return null;
 }
 
