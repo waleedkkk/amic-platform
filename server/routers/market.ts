@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getCandleHistoryCached, type CandleHistory, type CandleInterval } from "../candles";
 import { getMarketSnapshot, getUserChartPreferences, saveMarketSnapshot, saveUserChartPreferences } from "../db";
 import { callTradingViewTool, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
+import { getTwelveDataLiveQuote } from "../twelveDataStream";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { DEFAULT_CHART_LAYERS, normalizeChartLayers } from "../../shared/chartPreferences";
 
@@ -134,6 +135,10 @@ async function cached<T>(
 
 export const marketRouter = router({
   availableTools: protectedProcedure.query(() => listTradingViewTools()),
+
+  liveQuote: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(32), exchange: z.string().min(1).max(32) }))
+    .query(({ input }) => getTwelveDataLiveQuote(input.symbol, input.exchange)),
 
   preciousMetals: publicProcedure
     .input(z.object({ range: sparklineRange.optional() }).optional())

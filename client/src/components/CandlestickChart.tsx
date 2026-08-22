@@ -5,6 +5,7 @@ import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } fro
 import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStructure";
 import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
 import { DEFAULT_CHART_LAYERS, normalizeChartLayers, type ChartLayerPreferences } from "@shared/chartPreferences";
+import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
 import {
   CandlestickSeries,
   createSeriesMarkers,
@@ -112,11 +113,15 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
   const liveStreamUrl = useMemo(() => getBinanceKlineStream(symbol, exchange, interval), [symbol, exchange, interval]);
   const [liveCandle, setLiveCandle] = useState<LiveChartCandle | null>(null);
-  const [liveStatus, setLiveStatus] = useState<"live" | "connecting" | "reconnecting" | "delayed">("delayed");
+  const [liveStatus, setLiveStatus] = useState<ChartLiveProviderStatus>("delayed");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const candlesQuery = trpc.market.candles.useQuery(
     { symbol, exchange, interval: interval as "60m" | "1d" | "1wk" | "1mo", range: intervalToRange(interval) },
     { refetchOnWindowFocus: true, refetchInterval: interval === "1m" || interval === "5m" ? 30_000 : interval === "15m" || interval === "60m" ? 60_000 : 5 * 60_000, enabled: Boolean(symbol) && Boolean(exchange) },
+  );
+  const twelveLiveQuote = trpc.market.liveQuote.useQuery(
+    { symbol, exchange },
+    { enabled: Boolean(symbol) && Boolean(exchange) && exchange.toUpperCase() !== "BINANCE", refetchInterval: 2_500, refetchOnWindowFocus: true },
   );
   const chartCandles = useMemo(() => mergeLiveCandle(candlesQuery.data?.candles ?? [], liveCandle), [candlesQuery.data?.candles, liveCandle]);
   const latestCrossover = useMemo(
@@ -179,6 +184,25 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       socket.close();
     };
   }, [liveStreamUrl, reconnectAttempt]);
+
+  useEffect(() => {
+    if (exchange.toUpperCase() === "BINANCE") return;
+    const quote = twelveLiveQuote.data;
+    const last = candlesQuery.data?.candles.at(-1);
+    if (!quote?.price || !last) {
+      setLiveStatus(quote?.status ?? "unavailable");
+      return;
+    }
+    setLiveStatus(quote.status);
+    setLiveCandle({
+      time: last.time,
+      open: last.open,
+      high: Math.max(last.high, quote.price),
+      low: Math.min(last.low, quote.price),
+      close: quote.price,
+      volume: last.volume,
+    });
+  }, [candlesQuery.data?.candles, exchange, twelveLiveQuote.data]);
 
   // Create chart once per container
   useEffect(() => {
@@ -376,6 +400,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     setVisible(next);
     saveChartPreferences.mutate({ layers: next });
   };
+  const liveProvider = exchange.toUpperCase() === "BINANCE" ? "binance" : "twelve-data";
+  const livePresentation = describeLiveProviderStatus(liveStatus, liveProvider);
 
   return (
     <Card className="bg-white/[0.02]">
@@ -455,9 +481,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                 {chartCandles.length} شمعة · {candlesQuery.data.interval} ·{" "}
                 {candlesQuery.data.exchangeName}
               </span>
-              <span className={liveStatus === "live" ? "font-mono text-emerald-300" : "font-mono text-amber-300"}>
-                {liveStatus === "live" ? "● حي · Binance" : liveStatus === "connecting" || liveStatus === "reconnecting" ? "◌ جارٍ وصل البث" : "◌ بيانات مؤجلة وفق الإطار"}
-              </span>
+              <span className={livePresentation.className}>{livePresentation.label}</span>
               <span className="font-mono text-muted-foreground">
                 الشموع: {candlesQuery.data.provider === "twelve-data" ? "Twelve Data مرخّص" : "Yahoo Finance احتياطي"}
               </span>
