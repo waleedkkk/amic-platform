@@ -10,9 +10,11 @@ import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
 import { getChartOverlayDensity } from "@/lib/chartOverlayDensity";
 import { isChartFullscreenTarget, requestChartFullscreen, type ChartFullscreenMode } from "@/lib/chartFullscreen";
+import { countEnabledIctLayers, ICT_LAYER_CONTROLS } from "@/lib/chartMobileControls";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateConfluenceIct, type ConfluenceIctSettings } from "@shared/confluenceIct";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, SlidersHorizontal } from "lucide-react";
 import {
   CandlestickSeries,
   createSeriesMarkers,
@@ -573,6 +575,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   };
   const liveProvider = exchange.toUpperCase() === "BINANCE" ? "binance" : "twelve-data";
   const livePresentation = describeLiveProviderStatus(liveStatus, liveProvider);
+  const enabledIctLayerCount = countEnabledIctLayers(preferences.confluenceIct);
   const toggleChartFullscreen = async () => {
     const target = chartFullscreenRef.current;
     if (!target) return;
@@ -608,17 +611,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5 sm:flex sm:items-center">
-              {(
-                [
-                  { key: "trend", label: "EMA Trend" },
-                  { key: "structure", label: "BOS / CHoCH" },
-                  { key: "liquidity", label: "BSL / SSL" },
-                  { key: "zones", label: "OB / FVG" },
-                  { key: "signals", label: "BUY / SELL" },
-                  { key: "summary", label: "ملخص ICT" },
-                ] as const
-              ).map(btn => (
+            <div className="hidden grid-cols-2 gap-1 rounded-lg border border-white/[0.08] bg-black/25 p-0.5 sm:flex sm:items-center">
+              {ICT_LAYER_CONTROLS.map(btn => (
                 <button
                   key={btn.key}
                   type="button"
@@ -630,13 +624,38 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                 </button>
               ))}
             </div>
-            <button type="button" onClick={() => setShowConfluenceSettings(open => !open)} className="min-h-10 rounded-lg border border-primary/25 bg-primary/[0.08] px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/[0.14]">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" aria-label="فتح أدوات طبقات ICT" className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 text-xs font-medium text-foreground transition-colors hover:bg-white/[0.09] sm:hidden">
+                  <SlidersHorizontal className="size-4 text-primary" /> الطبقات <span className="font-mono text-primary">{enabledIctLayerCount}/6</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60 border-white/[0.12] bg-[#0a111b] p-1.5 text-foreground">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">طبقات ICT</DropdownMenuLabel>
+                {ICT_LAYER_CONTROLS.map(control => (
+                  <DropdownMenuCheckboxItem
+                    key={control.key}
+                    checked={preferences.confluenceIct[control.key]}
+                    onSelect={event => event.preventDefault()}
+                    onCheckedChange={() => updateConfluence({ [control.key]: !preferences.confluenceIct[control.key] })}
+                    className="min-h-10 rounded-md text-xs"
+                  >
+                    {control.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuSeparator className="bg-white/[0.1]" />
+                <DropdownMenuItem onSelect={() => setShowConfluenceSettings(open => !open)} className="min-h-10 rounded-md text-xs text-primary focus:bg-primary/10 focus:text-primary">
+                  {showConfluenceSettings ? "إخفاء إعدادات ICT" : "إعدادات ICT"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button type="button" onClick={() => setShowConfluenceSettings(open => !open)} className="hidden min-h-10 rounded-lg border border-primary/25 bg-primary/[0.08] px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/[0.14] sm:inline-flex sm:items-center">
               {showConfluenceSettings ? "إخفاء إعدادات ICT" : "إعدادات ICT"}
             </button>
             <button type="button" onClick={() => void toggleChartFullscreen()} aria-label={isChartFullscreen ? "الخروج من ملء شاشة المخطط" : "عرض المخطط بملء الشاشة"} title={isChartFullscreen ? "الخروج من ملء الشاشة" : "ملء الشاشة"} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 text-xs font-medium text-foreground transition-colors hover:bg-white/[0.09]">
               {isChartFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}<span className="sm:hidden">{isChartFullscreen ? "خروج" : "ملء الشاشة"}</span>
             </button>
-            <span className="self-center text-[10px] text-muted-foreground">
+            <span className="hidden self-center text-[10px] text-muted-foreground sm:inline">
               {chartPreferencesQuery.isLoading ? "تحميل الطبقات…" : saveChartPreferences.isPending ? "حفظ الطبقات…" : "تفضيلاتك محفوظة"}
             </span>
           </div>
