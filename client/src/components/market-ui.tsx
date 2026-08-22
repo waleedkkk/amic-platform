@@ -6,6 +6,8 @@ import { Link } from "wouter";
 
 export type RecordValue = Record<string, unknown>;
 
+export const BOLLINGER_VALUE_CANDIDATES = ["bollinger", "bollinger_bands", "bollingerBands", "BB", "bbw"];
+
 export function safeRecord(value: unknown): RecordValue {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as RecordValue) : {};
 }
@@ -26,7 +28,7 @@ export function findValue(value: unknown, candidates: string[], depth = 0): unkn
         const nested = safeRecord(candidateValue);
         for (const preferred of [
           "value", "close", "current_price", "last", "level",
-          "macd_line", "histogram", "line", "signal",
+          "macd_line", "histogram", "line", "signal", "middle",
         ]) {
           if (preferred in nested) return nested[preferred];
         }
