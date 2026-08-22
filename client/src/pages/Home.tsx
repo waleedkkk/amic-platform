@@ -1,9 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { DataTable, EmptyAction, formatValue, MetricCard, PageHeading, Panel } from "@/components/market-ui";
 import { PreciousMetalsWidget } from "@/components/PreciousMetalsWidget";
+import { saveMarketAssistantContext } from "@/lib/marketAssistantContext";
 import { trpc } from "@/lib/trpc";
 import { Activity, ArrowDownRight, ArrowUpRight, BarChart3, Bot, ScanSearch, TrendingDown, TrendingUp } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 type PriceRow = { symbol?: string; price?: number; change_pct?: number; currency?: string; changePercent?: number; close?: number; indicators?: { close?: number; RSI?: number; volume?: number } };
 
@@ -43,6 +44,7 @@ function SlicePanel({ title, subtitle, rows, negative, loading, error, icon }: {
 }
 
 export default function Home() {
+  const [, navigate] = useLocation();
   const slices = [
     { key: "cryptoGainers", title: "أبرز الرابحين — كريبتو", subtitle: "نسبة التغير وفق الإطار اليومي", negative: false, icon: <TrendingUp className="size-5 text-emerald-300" /> },
     { key: "cryptoLosers", title: "أبرز الخاسرين — كريبتو", subtitle: "تحركات تحتاج إلى قراءة حجم وتذبذب", negative: true, icon: <TrendingDown className="size-5 text-rose-300" /> },
@@ -62,6 +64,22 @@ export default function Home() {
   const anyLoading = snapshotQuery.isLoading || queries.some(q => q.query.isLoading);
   const anyData = Boolean(indices.length || etfs.length || queries.some(q => q.query.data && toMarketRows(q.query.data).length > 0));
   const allFailed = queries.every(q => q.query.isError) && snapshotQuery.isError;
+  const openAssistantWithMarketContext = () => {
+    if (typeof window !== "undefined") {
+      try {
+        saveMarketAssistantContext(window.sessionStorage, {
+          globalSnapshot: snapshotQuery.data ?? {},
+          cryptoGainers: queries[0].query.data ?? [],
+          cryptoLosers: queries[1].query.data ?? [],
+          stockGainers: queries[2].query.data ?? [],
+          stockLosers: queries[3].query.data ?? [],
+        });
+      } catch {
+        // يبقى الانتقال متاحًا حتى عند حظر sessionStorage من المتصفح.
+      }
+    }
+    navigate("/assistant");
+  };
 
   return <>
     <PageHeading eyebrow="LIVE MARKET DESK" title="نبضة السوق" description="نظرة عملية على الحركة النسبية عبر الكريبتو والأسهم وأسواق العملات، مع تحديث تلقائي للبيانات المتاحة." action={<div className="flex gap-2"><Button asChild variant="outline" className="bg-white/[0.03]"><Link href="/screener">ماسح السوق <ScanSearch className="mr-2 size-4" /></Link></Button><Button asChild><Link href="/analysis">بدء تحليل <ArrowUpRight className="mr-2 size-4" /></Link></Button></div>} />
@@ -73,7 +91,7 @@ export default function Home() {
         <SlicePanel key={key} title={title} subtitle={subtitle} negative={negative} loading={query.isLoading} error={query.error} icon={icon} rows={toMarketRows(query.data)} />
       ))}
     </div>
-    <div className="mt-6 grid gap-4 lg:grid-cols-[1.35fr_0.65fr]"><Panel><div className="flex items-start justify-between"><div><p className="text-xs font-semibold tracking-[0.12em] text-primary">GLOBAL SNAPSHOT</p><h2 className="mt-2 text-xl font-semibold">ملخص السياق الكلي</h2></div>{snapshotQuery.isLoading ? <span className="animate-spin"><Activity className="size-5 text-muted-foreground" /></span> : <Activity className="size-5 text-primary" />}</div><div className="mt-5"><DataTable rows={[...rowsWithChange(indices), ...rowsWithChange(snapshot.crypto ?? []), ...rowsWithChange(fx).slice(0, 3), ...rowsWithChange(etfs)]} emptyLabel={snapshotQuery.isLoading ? "جارٍ جلب ملخص السوق العالمي…" : "تظهر المؤشرات العالمية عند استجابة مزود البيانات."} /></div></Panel><Panel className="flex flex-col justify-between"><div><Bot className="size-6 text-primary" /><h2 className="mt-5 text-xl font-semibold">حوّل الأرقام إلى سياق</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">استخدم المساعد لتفسير مؤشراتك وأسئلتك مع تنبيه واضح بأن المخرجات معلوماتية وليست نصيحة استثمارية.</p></div><Button asChild className="mt-6"><Link href="/assistant">افتح مساعد AMIC <ArrowUpRight className="mr-2 size-4" /></Link></Button></Panel></div>
+    <div className="mt-6 grid gap-4 lg:grid-cols-[1.35fr_0.65fr]"><Panel><div className="flex items-start justify-between"><div><p className="text-xs font-semibold tracking-[0.12em] text-primary">GLOBAL SNAPSHOT</p><h2 className="mt-2 text-xl font-semibold">ملخص السياق الكلي</h2></div>{snapshotQuery.isLoading ? <span className="animate-spin"><Activity className="size-5 text-muted-foreground" /></span> : <Activity className="size-5 text-primary" />}</div><div className="mt-5"><DataTable rows={[...rowsWithChange(indices), ...rowsWithChange(snapshot.crypto ?? []), ...rowsWithChange(fx).slice(0, 3), ...rowsWithChange(etfs)]} emptyLabel={snapshotQuery.isLoading ? "جارٍ جلب ملخص السوق العالمي…" : "تظهر المؤشرات العالمية عند استجابة مزود البيانات."} /></div></Panel><Panel className="flex flex-col justify-between"><div><Bot className="size-6 text-primary" /><h2 className="mt-5 text-xl font-semibold">حوّل الأرقام إلى سياق</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">استخدم المساعد لتفسير مؤشراتك وأسئلتك مع تنبيه واضح بأن المخرجات معلوماتية وليست نصيحة استثمارية.</p></div><Button className="mt-6" onClick={openAssistantWithMarketContext}>افتح مساعد AMIC <ArrowUpRight className="mr-2 size-4" /></Button></Panel></div>
     {!anyLoading && !anyData && !allFailed ? <div className="mt-6"><EmptyAction title="ابدأ بقراءة أصل محدد" description="يمكنك إدخال الرمز والبورصة والإطار الزمني للحصول على RSI وMACD وBollinger Bands من خدمة التحليل." href="/analysis" action="الانتقال إلى التحليل" /></div> : null}
   </>;
 }
