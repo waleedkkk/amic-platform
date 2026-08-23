@@ -7,6 +7,7 @@ import { Activity, ArrowDownRight, ArrowUpRight, BarChart3, Bot, ScanSearch, Tre
 import { Link, useLocation } from "wouter";
 
 type PriceRow = { symbol?: string; price?: number; change_pct?: number; currency?: string; changePercent?: number; close?: number; indicators?: { close?: number; RSI?: number; volume?: number } };
+type CorrelationMatrixData = { assets: { id: string; label: string }[]; matrix: { id: string; values: (number | null)[] }[]; fetchedAt: string };
 
 function toMarketRows(value: unknown): PriceRow[] {
   if (!Array.isArray(value)) return [];
@@ -43,6 +44,19 @@ function SlicePanel({ title, subtitle, rows, negative, loading, error, icon }: {
   </Panel>;
 }
 
+function correlationClass(value: number | null) {
+  if (value === null) return "bg-white/[0.03] text-muted-foreground";
+  if (value >= 0.65) return "bg-emerald-400/25 text-emerald-100";
+  if (value >= 0.25) return "bg-emerald-400/10 text-emerald-200";
+  if (value <= -0.65) return "bg-rose-400/25 text-rose-100";
+  if (value <= -0.25) return "bg-rose-400/10 text-rose-200";
+  return "bg-white/[0.05] text-muted-foreground";
+}
+
+function CorrelationMatrixPanel({ data, loading, error }: { data?: CorrelationMatrixData; loading: boolean; error: unknown }) {
+  return <Panel className="mt-6"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold tracking-[0.12em] text-primary">MARKET RELATIONSHIPS</p><h2 className="mt-2 text-xl font-semibold">مصفوفة ارتباط الأصول</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">ارتباط Pearson لعوائد الإغلاق اليومية خلال التاريخ المتاح؛ لا يعني علاقة سببية.</p></div>{loading ? <Activity className="size-5 animate-spin text-muted-foreground" /> : <BarChart3 className="size-5 text-primary" />}</div>{error ? <p className="mt-5 text-sm text-muted-foreground">تعذّر حساب مصفوفة الارتباط الآن.</p> : data?.assets.length ? <div className="mt-5 overflow-x-auto"><table className="min-w-[620px] w-full border-separate border-spacing-1 text-center text-xs"><thead><tr><th className="p-2 text-right text-muted-foreground">الأصل</th>{data.assets.map(asset => <th key={asset.id} className="p-2 font-medium text-muted-foreground">{asset.label}</th>)}</tr></thead><tbody>{data.matrix.map((row, index) => <tr key={row.id}><th className="p-2 text-right font-medium">{data.assets[index]?.label}</th>{row.values.map((value, valueIndex) => <td key={`${row.id}-${data.assets[valueIndex]?.id}`}><span className={`block rounded-md px-2 py-2 font-mono ${correlationClass(value)}`}>{value === null ? "—" : value.toFixed(2)}</span></td>)}</tr>)}</tbody></table></div> : <p className="mt-5 text-sm text-muted-foreground">جارٍ انتظار بيانات كافية لحساب الارتباطات.</p>}</Panel>;
+}
+
 export default function Home() {
   const [, navigate] = useLocation();
   const slices = [
@@ -53,6 +67,7 @@ export default function Home() {
   ] as const;
 
   const snapshotQuery = trpc.market.overviewSlice.useQuery("globalSnapshot", { ...queryOpts, enabled: true });
+  const correlationQuery = trpc.market.correlationMatrix.useQuery(undefined, { staleTime: 55 * 60_000, refetchOnWindowFocus: false, retry: 1 });
   const queries = slices.map(s => ({ ...s, query: trpc.market.overviewSlice.useQuery(s.key, { ...queryOpts, enabled: true }) }));
 
   const snapshot = (snapshotQuery.data ?? {}) as { indices?: PriceRow[]; crypto?: PriceRow[]; fx?: PriceRow[]; etfs?: PriceRow[] };
@@ -85,6 +100,7 @@ export default function Home() {
     <PageHeading eyebrow="LIVE MARKET DESK" title="نبضة السوق" description="نظرة عملية على الحركة النسبية عبر الكريبتو والأسهم وأسواق العملات، مع تحديث تلقائي للبيانات المتاحة." action={<div className="flex gap-2"><Button asChild variant="outline" className="bg-white/[0.03]"><Link href="/screener">ماسح السوق <ScanSearch className="mr-2 size-4" /></Link></Button><Button asChild><Link href="/analysis">بدء تحليل <ArrowUpRight className="mr-2 size-4" /></Link></Button></div>} />
     {allFailed ? <div className="rounded-lg border border-white/10 bg-white/[0.03] px-6 py-10 text-center text-sm text-muted-foreground">تعذّر الوصول إلى مزود بيانات السوق حاليًا — تحقق من اتصالك ثم أعد تحميل الصفحة.</div> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="رابحو الكريبتو" value={formatValue(toMarketRows(queries[0].query.data).length, 0)} detail="نتائج متاحة على BINANCE" positive icon={<TrendingUp className="size-4 text-emerald-300" />} /><MetricCard label="خاسرو الكريبتو" value={formatValue(toMarketRows(queries[1].query.data).length, 0)} detail="نتائج متاحة على BINANCE" positive={false} icon={<TrendingDown className="size-4 text-rose-300" />} /><MetricCard label="حركة المؤشرات" value={formatValue(indices.length, 0)} detail="مؤشرات عالمية نشطة" icon={<BarChart3 className="size-4 text-sky-300" />} /><MetricCard label="لقطة العملات" value={eurRate?.price ? formatValue(eurRate.price, 4) : "—"} detail={eurRate?.price ? `EUR/USD من ملخص السوق العالمي` : "من ملخص السوق العالمي"} icon={<Activity className="size-4 text-amber-300" />} /></div>}
     <div className="mt-6"><PreciousMetalsWidget /></div>
+    <CorrelationMatrixPanel data={correlationQuery.data} loading={correlationQuery.isLoading} error={correlationQuery.error} />
     {anyLoading && !anyData ? <div className="mt-6 flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground"><Activity className="size-4 animate-spin" /> جارٍ جلب بيانات السوق…</div> : null}
     <div className="mt-6 grid gap-4 xl:grid-cols-2">
       {queries.map(({ key, title, subtitle, negative, icon, query }) => (

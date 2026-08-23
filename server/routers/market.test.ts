@@ -15,7 +15,7 @@ const mcpMocks = vi.hoisted(() => ({
 vi.mock("../db", () => databaseMocks);
 vi.mock("../mcpClient", () => mcpMocks);
 
-import { marketRouter } from "./market";
+import { cached, marketRouter } from "./market";
 
 const publicContext: TrpcContext = {
   user: null,
@@ -73,5 +73,19 @@ describe("marketRouter.analysis", () => {
       timeframe: "4h",
       payload: expect.objectContaining({ schemaVersion: 1, recommendation: expect.objectContaining({ signal: "buy" }) }),
     }));
+  });
+
+  it("يشارك التحميل الخارجي بين طلبين متزامنين للمفتاح نفسه", async () => {
+    databaseMocks.getMarketSnapshot.mockResolvedValue(undefined);
+    databaseMocks.saveMarketSnapshot.mockResolvedValue(undefined);
+    let resolveLoad!: (value: { value: string }) => void;
+    const load = vi.fn(() => new Promise<{ value: string }>(resolve => { resolveLoad = resolve; }));
+
+    const first = cached("test:coalesced", "analysis", "BINANCE", "1h", 45, load);
+    const second = cached("test:coalesced", "analysis", "BINANCE", "1h", 45, load);
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+
+    resolveLoad({ value: "shared" });
+    await expect(Promise.all([first, second])).resolves.toEqual([{ value: "shared" }, { value: "shared" }]);
   });
 });

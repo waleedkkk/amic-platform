@@ -111,6 +111,15 @@ export function getConfluenceReferencePrice(analysis: MultiTimeframeAnalysis) {
   return null;
 }
 
+export function resolveConfluenceDisplayPrice(livePrice: unknown, analysis: MultiTimeframeAnalysis) {
+  const parsedLivePrice = Number(livePrice);
+  if (Number.isFinite(parsedLivePrice) && parsedLivePrice > 0) {
+    return { price: parsedLivePrice, source: "live" as const, timeframe: null };
+  }
+  const reference = getConfluenceReferencePrice(analysis);
+  return reference ? { price: reference.price, source: "frame" as const, timeframe: reference.timeframe } : { price: null, source: "unavailable" as const, timeframe: null };
+}
+
 export function createSavedAnalysisPayload(analysis: TechnicalAnalysis, movingAverageCrossover: unknown) {
   return {
     contractVersion: analysis.schemaVersion,

@@ -5,7 +5,7 @@ vi.mock("./db", () => ({
   saveMarketSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { candleCacheTtlMs, candleSnapshotTimeframe, tvSymbolToYahoo, fetchCandleHistory, getCandleHistoryCached, hasRenderableCandleHistory } = await import("./candles");
+const { buildYahooCandleUrl, candleCacheTtlMs, candleSnapshotTimeframe, tvSymbolToYahoo, fetchCandleHistory, getCandleHistoryCached, hasRenderableCandleHistory, resampleFourHourCandles } = await import("./candles");
 const { getMarketSnapshot, saveMarketSnapshot } = await import("./db");
 
 describe("tvSymbolToYahoo mapping", () => {
@@ -55,6 +55,26 @@ describe("سياسة تحديث الشموع", () => {
     expect(candleSnapshotTimeframe("1wk")).toBe("1wk");
     expect(candleSnapshotTimeframe("15m").length).toBeLessThanOrEqual(8);
   });
+
+  it("يبني طلب تاريخ أقدم ينتهي قبل أقدم شمعة محمّلة", () => {
+    const url = new URL(buildYahooCandleUrl("BTC-USD", "15m", "5d", 1_000_000));
+    expect(url.searchParams.get("range")).toBeNull();
+    expect(url.searchParams.get("period2")).toBe("1000000");
+    expect(Number(url.searchParams.get("period1"))).toBeLessThan(1_000_000);
+  });
+
+  it("يعيد تجميع شموع الساعة إلى أربع ساعات مع الحفاظ على OHLCV", () => {
+    const base = 1_728_000_000;
+    const result = resampleFourHourCandles([0, 1, 2, 3].map(index => ({
+      time: base + index * 60 * 60,
+      open: 100 + index,
+      high: 102 + index,
+      low: 99 - index,
+      close: 101 + index,
+      volume: 10 + index,
+    })));
+    expect(result).toEqual([{ time: base, open: 100, high: 105, low: 96, close: 104, volume: 46 }]);
+  });
 });
 
 describe("getCandleHistoryCached", () => {
@@ -89,6 +109,19 @@ describe("getCandleHistoryCached", () => {
       cacheKey: "candles:BINANCE:BTCUSDT:15m:5d:180",
       timeframe: "15m",
     }));
+  });
+
+  it("يشارك طلب التاريخ الجاري بين استدعاءين متزامنين للمفتاح نفسه", async () => {
+    vi.mocked(getMarketSnapshot).mockResolvedValue(null);
+    vi.mocked(saveMarketSnapshot).mockResolvedValue(undefined);
+    let resolveHistory!: (value: Awaited<ReturnType<typeof getCandleHistoryCached>>) => void;
+    const fetchHistory = vi.fn(() => new Promise<Awaited<ReturnType<typeof getCandleHistoryCached>>>(resolve => { resolveHistory = resolve; }));
+    const first = getCandleHistoryCached("BTCUSDT", "BINANCE", "15m", "5d", 180, fetchHistory);
+    const second = getCandleHistoryCached("BTCUSDT", "BINANCE", "15m", "5d", 180, fetchHistory);
+
+    await vi.waitFor(() => expect(fetchHistory).toHaveBeenCalledTimes(1));
+    resolveHistory({ symbol: "BTCUSDT", yahooSymbol: "BTC-USD", provider: "yahoo", interval: "15m", candles: [{ time: 1, open: 1, high: 2, low: 1, close: 2, volume: 1 }, { time: 2, open: 2, high: 3, low: 2, close: 3, volume: 1 }], currency: "USD", exchangeName: "BINANCE", regularMarketPrice: 2, fetchedAt: new Date().toISOString() });
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
   });
 });
 

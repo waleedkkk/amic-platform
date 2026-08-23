@@ -70,6 +70,26 @@ export const paperTrades = mysqlTable(
   }),
 );
 
+export const paperTradeCritiques = mysqlTable(
+  "paperTradeCritiques",
+  {
+    paperTradeId: int("paperTradeId").primaryKey().references(() => paperTrades.id, { onDelete: "cascade" }),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    content: json("content").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({ userLookup: index("paper_trade_critiques_user_idx").on(table.userId) }),
+);
+
+export const paperTradingLeaderboardProfiles = mysqlTable("paperTradingLeaderboardProfiles", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  enabled: int("enabled").default(0).notNull(),
+  displayName: varchar("displayName", { length: 40 }).notNull(),
+  anonymized: int("anonymized").default(0).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const savedSignals = mysqlTable(
   "savedSignals",
   {
@@ -82,6 +102,7 @@ export const savedSignals = mysqlTable(
     confidence: int("confidence").notNull(),
     summary: text("summary").notNull(),
     analysisPayload: json("analysisPayload").notNull(),
+    publicShareId: varchar("publicShareId", { length: 36 }).unique(),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
@@ -231,6 +252,41 @@ export const metalAlertMonitorSettings = mysqlTable("metalAlertMonitorSettings",
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const economicCalendarSubscriptions = mysqlTable("economicCalendarSubscriptions", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  enabled: int("enabled").default(0).notNull(),
+  dailyDigestEnabled: int("dailyDigestEnabled").default(0).notNull(),
+  highImpactOnly: int("highImpactOnly").default(1).notNull(),
+  countries: json("countries").$type<string[]>().notNull(),
+  preAlertMinutes: int("preAlertMinutes").default(60).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const economicCalendarDeliveryLog = mysqlTable(
+  "economicCalendarDeliveryLog",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    eventId: varchar("eventId", { length: 180 }).notNull(),
+    deliveredAt: timestamp("deliveredAt").defaultNow().notNull(),
+  },
+  table => ({ uniqueDelivery: uniqueIndex("economic_calendar_delivery_unique").on(table.userId, table.eventId) }),
+);
+
+export const economicCalendarMonitorSettings = mysqlTable("economicCalendarMonitorSettings", {
+  id: int("id").primaryKey(),
+  scheduleTaskUid: varchar("scheduleTaskUid", { length: 65 }).unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const dailyMarketDigestMonitorSettings = mysqlTable("dailyMarketDigestMonitorSettings", {
+  id: int("id").primaryKey(),
+  scheduleTaskUid: varchar("scheduleTaskUid", { length: 65 }).unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type PaperTrade = typeof paperTrades.$inferSelect;
@@ -243,3 +299,4 @@ export type MetalAlert = typeof metalAlerts.$inferSelect;
 export type StructureAlert = typeof structureAlerts.$inferSelect;
 export type UserNotification = typeof userNotifications.$inferSelect;
 export type ChartPreferences = typeof chartPreferences.$inferSelect;
+export type EconomicCalendarSubscription = typeof economicCalendarSubscriptions.$inferSelect;

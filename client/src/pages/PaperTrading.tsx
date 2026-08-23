@@ -23,7 +23,7 @@ export default function PaperTrading() {
   const riskAssessment = useMemo(() => assessTradeRisk(form), [form]);
   const refreshTrades = () => { utils.paperTrading.list.invalidate(); utils.paperTrading.summary.invalidate(); };
   const open = trpc.paperTrading.open.useMutation({ onSuccess: () => { toast.success("فُتحت الصفقة الورقية."); setForm(initialForm); refreshTrades(); }, onError: error => toast.error(error.message) });
-  const close = trpc.paperTrading.close.useMutation({ onSuccess: result => { toast.success(`أُغلقت الصفقة. الربح/الخسارة المحققة: ${formatValue(result.realizedPnl, 4)}`); refreshTrades(); }, onError: error => toast.error(error.message) });
+  const close = trpc.paperTrading.close.useMutation({ onSuccess: result => { toast.success(`أُغلقت الصفقة. الربح/الخسارة المحققة: ${formatValue(result.realizedPnl, 4)}. يمكنك طلب نقد تعليمي اختياري من صفحة نقد الصفقات.`); refreshTrades(); }, onError: error => toast.error(error.message) });
   useEffect(() => { const draft = consumePaperTradeDraft(); if (draft) { setForm(draft); toast.info("حُمّلت مسودة الصفقة من التحليل. راجعها وعدّلها قبل الفتح."); } }, []);
   const submit = (event: FormEvent) => { event.preventDefault(); if (riskAssessment.warnings.length) return toast.error("صحّح تحذيرات المخاطرة والعائد قبل فتح الصفقة."); open.mutate({ ...form, symbol: form.symbol.toUpperCase(), exchange: form.exchange.toUpperCase(), stopLoss: form.stopLoss || undefined, takeProfit: form.takeProfit || undefined, note: form.note || undefined }); };
   const openTrades = trades.data?.filter(trade => trade.status === "open") ?? [];

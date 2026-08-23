@@ -14,6 +14,9 @@ import {
 import { getDb } from "./db";
 import { aiRouter } from "./routers/ai";
 import { adminAiRouter } from "./routers/adminAi";
+import { backtestRouter } from "./routers/backtest";
+import { leaderboardRouter } from "./routers/leaderboard";
+import { economicCalendarRouter } from "./routers/economicCalendar";
 import { marketRouter } from "./routers/market";
 import { metalAlertsRouter } from "./routers/metalAlerts";
 import { paperTradingRouter } from "./routers/paperTrading";
@@ -73,11 +76,14 @@ export const appRouter = router({
     }),
   }),
   market: marketRouter,
+  economicCalendar: economicCalendarRouter,
   metalAlerts: metalAlertsRouter,
   structureAlerts: structureAlertsRouter,
   paperTrading: paperTradingRouter,
   signals: signalsRouter,
   ai: aiRouter,
+  backtest: backtestRouter,
+  leaderboard: leaderboardRouter,
 });
 
 export type AppRouter = typeof appRouter;

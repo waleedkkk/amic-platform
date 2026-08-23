@@ -3,6 +3,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CandlestickChart as PriceChart } from "@/components/CandlestickChart";
+import { ConfluenceBreakdownPanel } from "@/components/ConfluenceBreakdownPanel";
+import { SessionHeatmapPanel } from "@/components/SessionHeatmapPanel";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
 import { formatValue, LoadState, MetricCard, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
 import { createSavedAnalysisPayload, getTechnicalDetailGroups, getTechnicalMetricCards, getUnavailableMetricLabels } from "@/lib/technicalAnalysisViewModel";
@@ -124,6 +126,8 @@ export default function TechnicalAnalysis() {
             {metrics.map(metric => <MetricCard key={metric.id} label={metric.label} value={formatValue(metric.value, metric.digits)} detail={metric.detail} icon={metricIcon(metric.id)} />)}
           </div>
           <PriceChart symbol={params.symbol} exchange={params.exchange} onCrossoverChange={handleCrossoverChange} proposedRiskLevels={chartRiskLevels} />
+          <ConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} interval={params.timeframe === "1h" ? "60m" : params.timeframe === "1D" ? "1d" : params.timeframe === "1W" ? "1wk" : params.timeframe} />
+          <SessionHeatmapPanel symbol={params.symbol} exchange={params.exchange} />
           {unavailableMetrics.length > 0 ? <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">تعذّر على مزود التحليل تقديم {unavailableMetrics.join("، ")} لهذه القراءة. تبقى بقية بيانات التحليل متاحة، ويمكنك إعادة التحديث أو تجربة إطار آخر.</div> : null}
 
           {detailGroups.length > 0 ? <section className="mt-6 grid gap-4 lg:grid-cols-3" aria-label="تفاصيل المؤشرات المعيارية">

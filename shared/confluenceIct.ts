@@ -65,6 +65,16 @@ export type IndicatorSummary = {
   reasons: string[];
 };
 
+/** مساهمة فعلية في الدرجة النهائية بحسب وضع الحساب الحالي، للعرض التفسيري فقط. */
+export type ConfluenceContribution = {
+  id: string;
+  label: string;
+  description: string;
+  direction: "bullish" | "bearish";
+  points: number;
+  maxPoints: number;
+};
+
 export type ChartIndicatorResult = {
   id: "confluence-ict-v3-4";
   lines: IndicatorLine[];
@@ -73,6 +83,7 @@ export type ChartIndicatorResult = {
   events: IndicatorEvent[];
   signals: IndicatorSignal[];
   summary: IndicatorSummary;
+  breakdown: ConfluenceContribution[];
 };
 
 export type ConfluenceIctSettings = {
@@ -333,7 +344,7 @@ function trimZones(zones: ActiveZone[], kind: ActiveZone["kind"], maximum: numbe
 export function calculateConfluenceIct(candles: IndicatorCandle[], input?: Partial<ConfluenceIctSettings>): ChartIndicatorResult {
   const settings = resolveSettings(input);
   const emptySummary: IndicatorSummary = { mode: settings.mode, preset: settings.preset, trend: "neutral", confluence: { bull: 0, bear: 0, net: 0, max: settings.useStructureInScore ? 7 : 6 }, ict: { bull: 0, bear: 0, max: 10 }, scalp: { bull: 0, bear: 0, threshold: 0, max: 0 }, signal: "WAIT", reasons: [] };
-  if (!candles.length) return { id: "confluence-ict-v3-4", lines: [], zones: [], levels: [], events: [], signals: [], summary: emptySummary };
+  if (!candles.length) return { id: "confluence-ict-v3-4", lines: [], zones: [], levels: [], events: [], signals: [], summary: emptySummary, breakdown: [] };
 
   const closes = candles.map(candle => candle.close);
   const highs = candles.map(candle => candle.high);
@@ -368,6 +379,7 @@ export function calculateConfluenceIct(candles: IndicatorCandle[], input?: Parti
   let liquidityHigh: IndicatorLevel | null = null;
   let liquidityLow: IndicatorLevel | null = null;
   let trendDirection: -1 | 0 | 1 = 0;
+  let latestBreakdown: ConfluenceContribution[] = [];
   let lastBullSweep = -Infinity;
   let lastBearSweep = -Infinity;
   let lastBullStructure = -Infinity;
@@ -513,6 +525,29 @@ export function calculateConfluenceIct(candles: IndicatorCandle[], input?: Parti
     if (strongSell && !previousStrongSell) signals.push({ id: `sell-${candle.time}`, direction: "bearish", time: candle.time, price: candle.close, label: "SELL", score: settings.mode === "scalping" ? scalpBear : bearScore - bullScore, maxScore: settings.mode === "scalping" ? scalpMax : maxScore, reasons });
     previousStrongBuy = strongBuy;
     previousStrongSell = strongSell;
+    const contribution = (id: string, label: string, description: string, bull: boolean, bear: boolean, points: number, maxPoints: number): ConfluenceContribution | null => {
+      if (!bull && !bear) return null;
+      return { id, label, description, direction: bull ? "bullish" : "bearish", points, maxPoints };
+    };
+    latestBreakdown = (settings.mode === "scalping"
+      ? [
+          contribution("ema", "ترتيب المتوسطات", "ترتيب EMA السريع والمتوسط والبطيء يدعم الاتجاه.", trendUp, trendDown, 1, 1),
+          contribution("momentum", "زخم السعر", "توافق MACD مع مرشح الزخم النشط يدعم الاتجاه.", momentumBull, momentumBear, 1, 1),
+          contribution("order-block", "منطقة Order Block", "السعر داخل منطقة أمر معاكسة مُكتشفة سابقًا.", bullObContext, bearObContext, 1, 1),
+          contribution("structure", "بنية السوق", "حدث BOS أو CHoCH حديث ضمن نافذة السياق المحددة.", bullStructureContext, bearStructureContext, settings.requireStructure ? 2 : 0, settings.requireStructure ? 2 : 0),
+          contribution("liquidity", "سيولة / Sweep", "حدث سحب سيولة حديث ضمن نافذة السياق المحددة.", bullSweepContext, bearSweepContext, settings.requireSweep ? 2 : 0, settings.requireSweep ? 2 : 0),
+          contribution("fvg", "فجوة سعرية FVG", "السعر يعيد اختبار فجوة سعرية قوية ونشطة.", bullFvgRetest, bearFvgRetest, settings.requireFvg ? 2 : 0, settings.requireFvg ? 2 : 0),
+        ]
+      : [
+          contribution("ema", "ترتيب المتوسطات", "ترتيب EMA السريع والمتوسط والبطيء يدعم الاتجاه.", trendUp, trendDown, 1, 1),
+          contribution("rsi", "RSI", "مؤشر القوة النسبية داخل نطاق يؤيد الاتجاه.", rsiBull, rsiBear, 1, 1),
+          contribution("macd", "MACD", "تقاطع وخط هيستوغرام MACD يؤيدان الاتجاه.", macdBull, macdBear, 1, 1),
+          contribution("stochastic", "Stochastic", "تقاطع Stochastic يقع خارج منطقة التشبع المعاكسة.", stochasticBull, stochasticBear, 1, 1),
+          contribution("adx", "قوة الاتجاه ADX", "قوة الاتجاه تجاوزت العتبة مع اتجاه DMI المناسب.", adxBull, adxBear, 1, 1),
+          contribution("obv", "تدفق الحجم OBV", "حجم التراكم أو التصريف يؤيد الاتجاه.", obvBull, obvBear, 1, 1),
+          contribution("structure", "بنية السوق", "الاتجاه البنيوي الحالي أضاف نقطة إلى درجة التلاقي.", trendDirection === 1, trendDirection === -1, settings.useStructureInScore ? 1 : 0, settings.useStructureInScore ? 1 : 0),
+        ]
+    ).filter((item): item is ConfluenceContribution => Boolean(item && item.points > 0));
     latestSummary = {
       mode: settings.mode,
       preset: settings.preset,
@@ -534,6 +569,7 @@ export function calculateConfluenceIct(candles: IndicatorCandle[], input?: Parti
     events: events.slice(-120),
     signals: signals.slice(-40),
     summary: latestSummary,
+    breakdown: latestBreakdown,
   };
 }
 

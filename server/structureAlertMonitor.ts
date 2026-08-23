@@ -18,12 +18,13 @@ const EVENT_KIND = {
 } as const;
 
 function toCandleInterval(interval: "5m" | "15m" | "1h" | "4h" | "1d" | "1wk") {
-  return interval === "1h" ? "60m" : interval === "4h" ? "60m" : interval;
+  return interval === "1h" ? "60m" : interval;
 }
 
 function rangeFor(interval: "5m" | "15m" | "1h" | "4h" | "1d" | "1wk") {
   if (interval === "5m" || interval === "15m") return "5d";
-  if (interval === "1h" || interval === "4h") return "1mo";
+  if (interval === "1h") return "1mo";
+  if (interval === "4h") return "3mo";
   return interval === "1wk" ? "2y" : "6mo";
 }
 

@@ -1,17 +1,24 @@
 import Decimal from "decimal.js";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { randomUUID } from "node:crypto";
 import {
   InsertSavedSignal,
   aiConversationMessages,
   aiMemorySettings,
   chartPreferences,
+  dailyMarketDigestMonitorSettings,
+  economicCalendarDeliveryLog,
+  economicCalendarMonitorSettings,
+  economicCalendarSubscriptions,
   InsertUser,
   marketSnapshots,
   metalAlertMonitorSettings,
   metalAlerts,
   structureAlerts,
   paperTrades,
+  paperTradeCritiques,
+  paperTradingLeaderboardProfiles,
   savedSignals,
   userNotifications,
   userTelegramSettings,
@@ -20,8 +27,10 @@ import {
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { calculateRealizedPnl } from "./paperCalculations";
+import { createMarketSnapshotL1Cache } from "./marketSnapshotL1";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+const marketSnapshotL1 = createMarketSnapshotL1Cache(500);
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
@@ -149,6 +158,62 @@ export async function closeUserPaperTrade(userId: number, tradeId: number, close
   return { id: tradeId, exitPrice: closePrice.toFixed(8), realizedPnl, closedAt };
 }
 
+export async function getUserClosedPaperTrade(userId: number, tradeId: number) {
+  const db = await requireDb();
+  const [trade] = await db.select().from(paperTrades).where(and(eq(paperTrades.id, tradeId), eq(paperTrades.userId, userId), eq(paperTrades.status, "closed"))).limit(1);
+  return trade;
+}
+
+export async function getUserPaperTradeCritique(userId: number, tradeId: number) {
+  const db = await requireDb();
+  const [critique] = await db.select().from(paperTradeCritiques).where(and(eq(paperTradeCritiques.paperTradeId, tradeId), eq(paperTradeCritiques.userId, userId))).limit(1);
+  return critique;
+}
+
+export async function saveUserPaperTradeCritique(userId: number, tradeId: number, content: Record<string, unknown>) {
+  const db = await requireDb();
+  await db.insert(paperTradeCritiques).values({ paperTradeId: tradeId, userId, content }).onDuplicateKeyUpdate({ set: { content, updatedAt: new Date() } });
+  return { paperTradeId: tradeId, content };
+}
+
+export async function getPaperTradingLeaderboardProfile(userId: number) {
+  const db = await requireDb();
+  const [profile] = await db.select().from(paperTradingLeaderboardProfiles).where(eq(paperTradingLeaderboardProfiles.userId, userId)).limit(1);
+  return profile;
+}
+
+export async function savePaperTradingLeaderboardProfile(userId: number, input: { enabled: boolean; displayName: string; anonymized: boolean }) {
+  const db = await requireDb();
+  await db.insert(paperTradingLeaderboardProfiles).values({ userId, enabled: input.enabled ? 1 : 0, displayName: input.displayName, anonymized: input.anonymized ? 1 : 0 }).onDuplicateKeyUpdate({ set: { enabled: input.enabled ? 1 : 0, displayName: input.displayName, anonymized: input.anonymized ? 1 : 0, updatedAt: new Date() } });
+  return input;
+}
+
+export async function listPaperTradingLeaderboard() {
+  const db = await requireDb();
+  const rows = await db.select({ profile: paperTradingLeaderboardProfiles, trade: paperTrades }).from(paperTradingLeaderboardProfiles).leftJoin(paperTrades, and(eq(paperTradingLeaderboardProfiles.userId, paperTrades.userId), eq(paperTrades.status, "closed"))).where(eq(paperTradingLeaderboardProfiles.enabled, 1));
+  type LeaderboardTrade = { entryPrice: string; exitPrice: string | null; side: "long" | "short"; realizedPnl: string | null };
+  const grouped = new Map<number, { displayName: string; trades: LeaderboardTrade[] }>();
+  for (const row of rows) {
+    const entry = grouped.get(row.profile.userId) ?? { displayName: row.profile.anonymized ? "متداول مجهول" : row.profile.displayName, trades: [] };
+    if (row.trade) entry.trades.push(row.trade);
+    grouped.set(row.profile.userId, entry);
+  }
+  const leaderboard: Array<{ displayName: string; totalTrades: number; winRate: number; totalReturnPercent: number; realizedPnl: string }> = [];
+  grouped.forEach((entry: { displayName: string; trades: LeaderboardTrade[] }) => {
+    const closed: LeaderboardTrade[] = entry.trades.filter((trade: LeaderboardTrade) => Boolean(trade.exitPrice));
+    const wins = closed.filter((trade: LeaderboardTrade) => new Decimal(trade.realizedPnl ?? "0").gt(0)).length;
+    const returnPercent = closed.reduce((total: Decimal, trade: LeaderboardTrade) => {
+      const entryPrice = new Decimal(trade.entryPrice);
+      const exitPrice = new Decimal(trade.exitPrice ?? trade.entryPrice);
+      const movement = trade.side === "long" ? exitPrice.minus(entryPrice) : entryPrice.minus(exitPrice);
+      return total.plus(movement.div(entryPrice).mul(100));
+    }, new Decimal(0));
+    const realizedPnl = closed.reduce((total: Decimal, trade: LeaderboardTrade) => total.plus(new Decimal(trade.realizedPnl ?? "0")), new Decimal(0));
+    if (closed.length) leaderboard.push({ displayName: entry.displayName, totalTrades: closed.length, winRate: Number((wins / closed.length * 100).toFixed(1)), totalReturnPercent: Number(returnPercent.toFixed(2)), realizedPnl: realizedPnl.toFixed(4) });
+  });
+  return leaderboard.sort((a, b) => b.totalReturnPercent - a.totalReturnPercent).slice(0, 50);
+}
+
 export async function getUserPaperTradingSummary(userId: number) {
   const trades = await listUserPaperTrades(userId);
   const closedTrades = trades.filter(trade => trade.status === "closed");
@@ -166,10 +231,11 @@ export async function getUserPaperTradingSummary(userId: number) {
   };
 }
 
-export async function createUserSignal(userId: number, input: Omit<InsertSavedSignal, "id" | "userId" | "createdAt">) {
+export async function createUserSignal(userId: number, input: Omit<InsertSavedSignal, "id" | "userId" | "createdAt" | "publicShareId">, sharePublic = false) {
   const db = await requireDb();
-  const result = await db.insert(savedSignals).values({ ...input, userId });
-  return { id: Number(result[0].insertId) };
+  const publicShareId = sharePublic ? randomUUID() : null;
+  const result = await db.insert(savedSignals).values({ ...input, userId, publicShareId });
+  return { id: Number(result[0].insertId), publicShareId };
 }
 
 export async function listUserSignals(userId: number) {
@@ -183,12 +249,70 @@ export async function deleteUserSignal(userId: number, signalId: number) {
   return { success: true } as const;
 }
 
+export async function enablePublicSignalShare(userId: number, signalId: number) {
+  const db = await requireDb();
+  const [signal] = await db.select({ publicShareId: savedSignals.publicShareId }).from(savedSignals).where(and(eq(savedSignals.id, signalId), eq(savedSignals.userId, userId))).limit(1);
+  if (!signal) return null;
+  if (signal.publicShareId) return { publicShareId: signal.publicShareId };
+  const publicShareId = randomUUID();
+  await db.update(savedSignals).set({ publicShareId }).where(and(eq(savedSignals.id, signalId), eq(savedSignals.userId, userId)));
+  return { publicShareId };
+}
+
+/** إسقاط مقصود للبيانات: لا يعيد userId أو البريد أو غلاف التحليل الخاص في الرابط العام. */
+export async function getPublicSignal(publicShareId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [signal] = await db.select({
+    symbol: savedSignals.symbol,
+    exchange: savedSignals.exchange,
+    timeframe: savedSignals.timeframe,
+    recommendation: savedSignals.recommendation,
+    confidence: savedSignals.confidence,
+    summary: savedSignals.summary,
+    createdAt: savedSignals.createdAt,
+  }).from(savedSignals).where(eq(savedSignals.publicShareId, publicShareId)).limit(1);
+  return signal ?? null;
+}
+
 export async function getMarketSnapshot(cacheKey: string) {
+  const inMemory = marketSnapshotL1.get(cacheKey);
+  if (inMemory !== undefined) return inMemory;
   const db = await getDb();
   if (!db) return undefined;
   const [snapshot] = await db.select().from(marketSnapshots).where(eq(marketSnapshots.cacheKey, cacheKey)).limit(1);
   if (!snapshot || snapshot.expiresAt <= new Date()) return undefined;
+  marketSnapshotL1.set(cacheKey, snapshot.payload, snapshot.expiresAt);
   return snapshot.payload;
+}
+
+/** نحتفظ باللقطات المنتهية ليوم إضافي لتسهيل التشخيص قبل التنظيف الدوري. */
+export const MARKET_SNAPSHOT_CLEANUP_RETENTION_MS = 24 * 60 * 60 * 1_000;
+
+export function getMarketSnapshotCleanupCutoff(now = new Date()) {
+  return new Date(now.getTime() - MARKET_SNAPSHOT_CLEANUP_RETENTION_MS);
+}
+
+export function shouldCleanupMarketSnapshot(expiresAt: Date, now = new Date()) {
+  return expiresAt.getTime() < getMarketSnapshotCleanupCutoff(now).getTime();
+}
+
+type MarketSnapshotCleanupDb = {
+  delete: (table: typeof marketSnapshots) => {
+    where: (condition: unknown) => Promise<unknown>;
+  };
+};
+
+/**
+ * يحذف فقط لقطات الكاش المنتهية منذ أكثر من يوم. يُقبل db اختياريًا للاختبار
+ * دون الحاجة إلى قاعدة بيانات فعلية؛ المسار التشغيلي يستعمل اتصال Drizzle المعتاد.
+ */
+export async function cleanupExpiredMarketSnapshots(options: { now?: Date; db?: MarketSnapshotCleanupDb } = {}) {
+  const cutoff = getMarketSnapshotCleanupCutoff(options.now);
+  const db = options.db ?? await getDb();
+  if (!db) return 0;
+  const result = await db.delete(marketSnapshots).where(lt(marketSnapshots.expiresAt, cutoff));
+  return Number((result as Array<{ affectedRows?: number }>)[0]?.affectedRows ?? 0);
 }
 
 const MAX_ASSISTANT_MEMORY_MESSAGES = 12;
@@ -257,6 +381,7 @@ export async function saveMarketSnapshot(input: {
   payload: unknown;
   expiresAt: Date;
 }) {
+  marketSnapshotL1.set(input.cacheKey, input.payload, input.expiresAt);
   const db = await getDb();
   if (!db) return;
   await db.insert(marketSnapshots).values(input).onDuplicateKeyUpdate({
@@ -322,6 +447,70 @@ export async function saveUserTelegramSettings(userId: number, input: { enabled:
   if (input.enabled && !chatId) throw new Error("أدخل معرّف محادثة تيليغرام قبل التفعيل.");
   await db.insert(userTelegramSettings).values({ userId, chatId, enabled: input.enabled ? 1 : 0 }).onDuplicateKeyUpdate({ set: { chatId, enabled: input.enabled ? 1 : 0, updatedAt: new Date() } });
   return { enabled: input.enabled, chatId };
+}
+
+export async function getEconomicCalendarSubscription(userId: number) {
+  const db = await requireDb();
+  const [subscription] = await db.select().from(economicCalendarSubscriptions).where(eq(economicCalendarSubscriptions.userId, userId)).limit(1);
+  return subscription;
+}
+
+export async function saveEconomicCalendarSubscription(userId: number, input: { enabled: boolean; highImpactOnly: boolean; countries: string[]; preAlertMinutes: number }) {
+  const db = await requireDb();
+  const countries = Array.from(new Set(input.countries.map(country => country.trim()).filter(Boolean))).slice(0, 10);
+  if (input.enabled && !countries.length) throw new Error("اختر بلدًا واحدًا على الأقل لاشتراك التقويم.");
+  await db.insert(economicCalendarSubscriptions).values({ userId, enabled: input.enabled ? 1 : 0, highImpactOnly: input.highImpactOnly ? 1 : 0, countries, preAlertMinutes: input.preAlertMinutes }).onDuplicateKeyUpdate({ set: { enabled: input.enabled ? 1 : 0, highImpactOnly: input.highImpactOnly ? 1 : 0, countries, preAlertMinutes: input.preAlertMinutes, updatedAt: new Date() } });
+  return { enabled: input.enabled, highImpactOnly: input.highImpactOnly, countries, preAlertMinutes: input.preAlertMinutes };
+}
+
+export async function saveDailyMarketDigestSubscription(userId: number, enabled: boolean) {
+  const db = await requireDb();
+  await db.insert(economicCalendarSubscriptions).values({ userId, enabled: 0, dailyDigestEnabled: enabled ? 1 : 0, highImpactOnly: 1, countries: ["United States"], preAlertMinutes: 60 }).onDuplicateKeyUpdate({ set: { dailyDigestEnabled: enabled ? 1 : 0, updatedAt: new Date() } });
+  return { enabled };
+}
+
+export async function listActiveDailyMarketDigestSubscriptions() {
+  const db = await requireDb();
+  return db.select({ subscription: economicCalendarSubscriptions, telegram: userTelegramSettings }).from(economicCalendarSubscriptions).leftJoin(userTelegramSettings, eq(economicCalendarSubscriptions.userId, userTelegramSettings.userId)).where(eq(economicCalendarSubscriptions.dailyDigestEnabled, 1));
+}
+
+export async function listActiveEconomicCalendarSubscriptions() {
+  const db = await requireDb();
+  return db.select({ subscription: economicCalendarSubscriptions, telegram: userTelegramSettings }).from(economicCalendarSubscriptions).leftJoin(userTelegramSettings, eq(economicCalendarSubscriptions.userId, userTelegramSettings.userId)).where(eq(economicCalendarSubscriptions.enabled, 1));
+}
+
+export async function recordEconomicCalendarDelivery(userId: number, eventId: string) {
+  const db = await requireDb();
+  try {
+    await db.insert(economicCalendarDeliveryLog).values({ userId, eventId });
+    return true;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
+    if (code === "ER_DUP_ENTRY") return false;
+    throw error;
+  }
+}
+
+export async function saveEconomicCalendarMonitorTaskUid(scheduleTaskUid: string) {
+  const db = await requireDb();
+  await db.insert(economicCalendarMonitorSettings).values({ id: 1, scheduleTaskUid }).onDuplicateKeyUpdate({ set: { scheduleTaskUid, updatedAt: new Date() } });
+}
+
+export async function getEconomicCalendarMonitorTaskUid() {
+  const db = await requireDb();
+  const [settings] = await db.select().from(economicCalendarMonitorSettings).where(eq(economicCalendarMonitorSettings.id, 1)).limit(1);
+  return settings?.scheduleTaskUid ?? null;
+}
+
+export async function saveDailyMarketDigestMonitorTaskUid(scheduleTaskUid: string) {
+  const db = await requireDb();
+  await db.insert(dailyMarketDigestMonitorSettings).values({ id: 1, scheduleTaskUid }).onDuplicateKeyUpdate({ set: { scheduleTaskUid, updatedAt: new Date() } });
+}
+
+export async function getDailyMarketDigestMonitorTaskUid() {
+  const db = await requireDb();
+  const [settings] = await db.select().from(dailyMarketDigestMonitorSettings).where(eq(dailyMarketDigestMonitorSettings.id, 1)).limit(1);
+  return settings?.scheduleTaskUid ?? null;
 }
 
 export async function getUserChartPreferences(userId: number) {

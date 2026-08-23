@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage } from "./chartLive";
+import { getBinanceKlineStream, mergeHistoricalCandles, mergeLiveCandle, parseBinanceKlineMessage } from "../shared/chartLive";
 
 describe("مسار البث الحي للشارت", () => {
   it("يُنشئ بث Binance للأزواج والأطر التي يدعمها فقط", () => {
@@ -20,6 +20,18 @@ describe("مسار البث الحي للشارت", () => {
   it("لا يعرض شمعة بث منفردة قبل وصول التاريخ", () => {
     const live = { time: 1_700_000_000, open: 100, high: 104, low: 99, close: 103, volume: 12.5 };
     expect(mergeLiveCandle([], live)).toEqual([]);
+  });
+
+  it("يدمج التاريخ الأقدم بترتيب زمني ومن دون تكرار عند حد الدفعات", () => {
+    const current = [
+      { time: 20, open: 2, high: 3, low: 1, close: 2, volume: 1 },
+      { time: 30, open: 3, high: 4, low: 2, close: 3, volume: 1 },
+    ];
+    const older = [
+      { time: 10, open: 1, high: 2, low: 0.5, close: 1, volume: 1 },
+      { time: 20, open: 99, high: 99, low: 99, close: 99, volume: 1 },
+    ];
+    expect(mergeHistoricalCandles(current, older)).toEqual([older[0], current[0], current[1]]);
   });
 
   it("يتجاهل رسائل البث غير الصالحة", () => {

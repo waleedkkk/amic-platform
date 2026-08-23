@@ -1,9 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ConfluenceBreakdownPanel } from "@/components/ConfluenceBreakdownPanel";
 import { Label } from "@/components/ui/label";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
 import { formatValue, LoadState, MetricCard, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
-import { describeConfluenceFrame, getConfluenceReferencePrice } from "@/lib/technicalAnalysisViewModel";
+import { describeConfluenceFrame, resolveConfluenceDisplayPrice } from "@/lib/technicalAnalysisViewModel";
 import { trpc } from "@/lib/trpc";
 import { makeAnalysisTradeDraft, storePaperTradeDraft } from "@/lib/paperTradeDraft";
 import { ChartNoAxesCombined, Search } from "lucide-react";
@@ -24,9 +25,9 @@ export default function Confluence() {
   const aggregateSignal = data?.recommendation.signal;
   const supportLevels = data?.levels.supports;
   const resistanceLevels = data?.levels.resistances;
-  const contractPrice = data ? getConfluenceReferencePrice(data) : null;
-  const referencePrice = quote.data?.price ?? contractPrice?.price ?? null;
-  const priceSource = quote.data?.price ? "اقتباس حي" : contractPrice ? `سعر مرجعي من ${contractPrice.timeframe}` : "غير متاح";
+  const resolvedPrice = data ? resolveConfluenceDisplayPrice(quote.data?.price, data) : { price: null, source: "unavailable" as const, timeframe: null };
+  const referencePrice = resolvedPrice.price;
+  const priceSource = resolvedPrice.source === "live" ? "اقتباس حي" : resolvedPrice.source === "frame" ? `سعر مرجعي من ${resolvedPrice.timeframe}` : "غير متاح";
 
   const handlePaperTrade = () => {
     const draft = makeAnalysisTradeDraft({ symbol: params.symbol, exchange: params.exchange, recommendation: aggregateSignal, price: referencePrice, supportLevels, resistanceLevels, note: "مسودة من توافق الأطر الزمنية." });
@@ -45,6 +46,7 @@ export default function Confluence() {
           <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">AGGREGATE READ</p><div className="mt-4"><SignalBadge value={aggregateSignal ?? "لم تُجمع قراءة بعد"} /></div><p className="mt-4 text-sm leading-7 text-muted-foreground">يُظهر هذا الملخص العقد المعياري الثابت للتحليل متعدد الأطر، ويُستخدم كسياق تعليمي لا كتعليمات تداول.</p><p className="mt-3 font-mono text-xs text-muted-foreground">السعر المرجعي: {referencePrice ? formatValue(referencePrice, 6) : "غير متاح"} · {priceSource}</p><Button variant="outline" onClick={handlePaperTrade} disabled={!data || !referencePrice} className="mt-5 w-full bg-white/[0.03]">فتح مسودة صفقة ورقية من التوافق</Button></Panel>
           <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">CONTRACT STATUS</p><div className="mt-4 grid gap-3 sm:grid-cols-3"><MetricCard label="الإصدار" value={data?.schemaVersion ?? "—"} detail="عقد توافق الأطر" /><MetricCard label="المصدر" value={data?.source ?? "—"} detail="مصدر التحليل" /><MetricCard label="الدرجة الصافية" value={formatValue(data?.alignment.netScore, 2)} detail={data?.alignment.status ?? "حالة التوافق"} /></div><p className="mt-4 text-xs leading-6 text-muted-foreground">الأطر المتعارضة: {data?.alignment.divergentTimeframes.length ? data.alignment.divergentTimeframes.join("، ") : "لا توجد أطر متعارضة مُبلّغ عنها"}</p>{data?.recommendation.rules.length ? <ul className="mt-4 list-inside list-disc space-y-1 text-sm text-muted-foreground">{data.recommendation.rules.map(rule => <li key={rule}>{rule}</li>)}</ul> : null}</Panel>
         </div>
+        <ConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} />
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="تفاصيل الأطر الزمنية المعيارية">
           {frames.map(frame => {
             const item = timeframes[frame];

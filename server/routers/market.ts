@@ -1,14 +1,16 @@
 import { z } from "zod";
 import { getCandleHistoryCached, type CandleHistory, type CandleInterval } from "../candles";
 import { getMarketSnapshot, getUserChartPreferences, saveMarketSnapshot, saveUserChartPreferences } from "../db";
+import { createInFlightRequestCoalescer } from "../cacheCoalescing";
 import { callTradingViewTool, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
 import { getTwelveDataLiveQuote } from "../twelveDataStream";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences } from "../../shared/chartPreferences";
 import { normalizeMultiTimeframeAnalysis, normalizeTechnicalAnalysis } from "../technicalAnalysis";
+import { correlationFromCandles } from "../../shared/correlation";
 
 const timeframe = z.enum(["5m", "15m", "1h", "4h", "1D", "1W", "1M"]);
-const candleInterval = z.enum(["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"]);
+const candleInterval = z.enum(["1m", "5m", "15m", "30m", "60m", "4h", "1d", "1wk", "1mo"]);
 const candleRange = z.enum(["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"]);
 const sparklineRange = z.enum(["day", "week"]);
 const chartLayers = z.object({
@@ -31,6 +33,7 @@ const chartPreferencesInput = z.object({
     summary: z.boolean(),
     settings: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   }),
+  priceScaleMode: z.enum(["normal", "logarithmic"]),
 });
 export type SparklineRange = z.infer<typeof sparklineRange>;
 
@@ -44,6 +47,8 @@ function intervalToRange(interval: CandleInterval): string {
       return "5d";
     case "60m":
       return "1mo";
+    case "4h":
+      return "3mo";
     case "1d":
       return "6mo";
     case "1wk":
@@ -59,6 +64,14 @@ const toolName = z.enum(TRADINGVIEW_TOOL_NAMES);
 const PRECIOUS_METALS = [
   { symbol: "XAUUSD", yahooSymbol: "GC=F", label: "الذهب", shortLabel: "XAU", precision: 2 },
   { symbol: "XAGUSD", yahooSymbol: "SI=F", label: "الفضة", shortLabel: "XAG", precision: 3 },
+] as const;
+
+const CORRELATION_ASSETS = [
+  { id: "dxy", label: "DXY", symbol: "DX-Y.NYB", exchange: "NASDAQ" },
+  { id: "gold", label: "الذهب", symbol: "GC=F", exchange: "OZ" },
+  { id: "silver", label: "الفضة", symbol: "SI=F", exchange: "OZ" },
+  { id: "spx", label: "S&P 500", symbol: "SPY", exchange: "NYSE" },
+  { id: "nasdaq", label: "Nasdaq 100", symbol: "QQQ", exchange: "NASDAQ" },
 ] as const;
 
 export type PreciousMetalQuote = {
@@ -125,7 +138,20 @@ async function fetchPreciousMetals(range: SparklineRange) {
   return { items, fetchedAt: new Date().toISOString() };
 }
 
-async function cached<T>(
+async function fetchCorrelationMatrix() {
+  const loaded = await Promise.allSettled(CORRELATION_ASSETS.map(async asset => ({ asset, history: await getCandleHistoryCached(asset.symbol, asset.exchange, "1d", "6mo", 180) })));
+  const histories = loaded.flatMap(item => item.status === "fulfilled" ? [item.value] : []);
+  const assets = histories.map(item => ({ id: item.asset.id, label: item.asset.label }));
+  const matrix = histories.map(left => ({
+    id: left.asset.id,
+    values: histories.map(right => left.asset.id === right.asset.id ? 1 : correlationFromCandles(left.history.candles, right.history.candles).value),
+  }));
+  return { assets, matrix, fetchedAt: new Date().toISOString() };
+}
+
+const marketCacheCoalescer = createInFlightRequestCoalescer();
+
+export async function cached<T>(
   cacheKey: string,
   market: string,
   exchange: string,
@@ -135,16 +161,18 @@ async function cached<T>(
 ) {
   const existing = await getMarketSnapshot(cacheKey);
   if (existing) return existing as T;
-  const result = await load();
-  await saveMarketSnapshot({
-    cacheKey,
-    market,
-    exchange,
-    timeframe: selectedTimeframe,
-    payload: result,
-    expiresAt: new Date(Date.now() + seconds * 1000),
+  return marketCacheCoalescer.run(cacheKey, async () => {
+    const result = await load();
+    await saveMarketSnapshot({
+      cacheKey,
+      market,
+      exchange,
+      timeframe: selectedTimeframe,
+      payload: result,
+      expiresAt: new Date(Date.now() + seconds * 1000),
+    });
+    return result;
   });
-  return result;
 }
 
 export const marketRouter = router({
@@ -160,6 +188,10 @@ export const marketRouter = router({
       const range = input?.range ?? "day";
       return cached(`widget:precious-metals:v3:${range}`, "metals", "OZ", range, 60, () => fetchPreciousMetals(range));
     }),
+
+  correlationMatrix: publicProcedure.query(() =>
+    cached("market:correlation-matrix:v1", "correlation", "MULTI", "1D", 60 * 60, fetchCorrelationMatrix),
+  ),
 
   overviewSlice: publicProcedure
     .input(z.enum(["cryptoGainers", "cryptoLosers", "stockGainers", "stockLosers", "globalSnapshot"]))
@@ -240,10 +272,11 @@ export const marketRouter = router({
         interval: candleInterval.default("1d"),
         range: candleRange.optional(),
         limit: z.number().int().min(120).max(600).optional(),
+        before: z.number().int().positive().optional(),
       }),
     )
     .query(({ input }) =>
-      getCandleHistoryCached(input.symbol, input.exchange, input.interval, input.range ?? intervalToRange(input.interval), input.limit),
+      getCandleHistoryCached(input.symbol, input.exchange, input.interval, input.range ?? intervalToRange(input.interval), input.limit, { before: input.before }),
     ),
 
   chartPreferences: router({

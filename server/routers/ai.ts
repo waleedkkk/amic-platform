@@ -95,8 +95,10 @@ export async function runMcpAssistedConversation(initialMessages: Message[]) {
       tool_calls: toolCalls,
     });
 
-    for (const toolCall of toolCalls) {
-      const outcome = await executeAssistantToolCall(toolCall);
+    // الأدوات المتاحة للقراءة فقط ومستقلة؛ نشغلها معًا ثم نضيف النتائج بترتيب
+    // طلب النموذج كي تبقى tool_call_id وسياق الجولة متوافقين مع واجهات LLM.
+    const outcomes = await Promise.all(toolCalls.map(toolCall => executeAssistantToolCall(toolCall)));
+    for (const outcome of outcomes) {
       conversation.push(outcome.message);
       if (outcome.activity) toolActivity.push(outcome.activity);
     }

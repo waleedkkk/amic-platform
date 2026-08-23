@@ -50,6 +50,21 @@ const toolResponse = (id: string, name: string, args: string) => ({
   model: "gpt-5-mini",
 });
 
+const multiToolResponse = (calls: Array<{ id: string; name: string; args: string }>) => ({
+  choices: [{
+    index: 0,
+    message: {
+      role: "assistant" as const,
+      content: "",
+      tool_calls: calls.map(call => ({ id: call.id, type: "function" as const, function: { name: call.name, arguments: call.args } })),
+    },
+    finish_reason: "tool_calls",
+  }],
+  id: "response",
+  created: 0,
+  model: "gpt-5-mini",
+});
+
 describe("aiRouter.explain مع أدوات السوق", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -102,6 +117,33 @@ describe("aiRouter.explain مع أدوات السوق", () => {
       expect.objectContaining({ role: "assistant", tool_calls: expect.any(Array) }),
       expect.objectContaining({ role: "tool", tool_call_id: "call-1", content: expect.stringContaining("neutral") }),
     ]));
+  });
+
+  it("يشغّل الأدوات المستقلة في الجولة نفسها بالتوازي ويحافظ على ترتيب رسائلها", async () => {
+    llmMocks.invokeLLM
+      .mockResolvedValueOnce(multiToolResponse([
+        { id: "call-first", name: "top_gainers", args: '{"exchange":"BINANCE","timeframe":"1h"}' },
+        { id: "call-second", name: "top_losers", args: '{"exchange":"BINANCE","timeframe":"1h"}' },
+      ]))
+      .mockResolvedValueOnce(finalResponse("اكتملت القراءتان بالتوازي."));
+    const resolvers: Array<(value: unknown) => void> = [];
+    mcpMocks.callTradingViewTool.mockImplementation(() => new Promise(resolve => resolvers.push(resolve)));
+    const caller = aiRouter.createCaller(context);
+
+    const response = caller.explain({ messages: [{ role: "user", content: "أعطني الرابحين والخاسرين" }] });
+    await vi.waitFor(() => expect(mcpMocks.callTradingViewTool).toHaveBeenCalledTimes(2));
+    // لو كان التنفيذ متسلسلًا لما بدأت الأداة الثانية قبل حل الأولى.
+    expect(resolvers).toHaveLength(2);
+    resolvers[1]!([{ symbol: "LOSS" }]);
+    resolvers[0]!([{ symbol: "GAIN" }]);
+
+    await expect(response).resolves.toEqual(expect.objectContaining({
+      content: "اكتملت القراءتان بالتوازي.",
+      toolActivity: [expect.objectContaining({ toolName: "top_gainers" }), expect.objectContaining({ toolName: "top_losers" })],
+    }));
+    const secondRoundMessages = llmMocks.invokeLLM.mock.calls[1][0].messages;
+    const toolMessages = secondRoundMessages.filter((item: { role: string }) => item.role === "tool");
+    expect(toolMessages.map((item: { tool_call_id?: string }) => item.tool_call_id)).toEqual(["call-first", "call-second"]);
   });
 
   it("لا يمرر أداة أو رمزًا غير معتمدين إلى MCP", async () => {

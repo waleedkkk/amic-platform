@@ -39,11 +39,13 @@ export const DEFAULT_CONFLUENCE_ICT_DISPLAY: ConfluenceIctDisplayPreferences = {
 export type ChartPreferences = {
   layers: ChartLayerPreferences;
   confluenceIct: ConfluenceIctDisplayPreferences;
+  priceScaleMode: "normal" | "logarithmic";
 };
 
 export const DEFAULT_CHART_PREFERENCES: ChartPreferences = {
   layers: { ...DEFAULT_CHART_LAYERS },
   confluenceIct: { ...DEFAULT_CONFLUENCE_ICT_DISPLAY, settings: { ...DEFAULT_CONFLUENCE_ICT_SETTINGS } },
+  priceScaleMode: "normal",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -82,5 +84,6 @@ export function normalizeChartPreferences(value: unknown): ChartPreferences {
   return {
     layers: normalizeChartLayers(legacyLayers),
     confluenceIct: { ...normalizedDisplay, settings: normalizeConfluenceIctSettings(confluence.settings) },
+    priceScaleMode: value.priceScaleMode === "logarithmic" ? "logarithmic" : "normal",
   };
 }

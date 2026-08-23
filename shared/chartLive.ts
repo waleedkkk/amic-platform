@@ -13,6 +13,7 @@ const binanceIntervals: Record<string, string> = {
   "15m": "15m",
   "30m": "30m",
   "60m": "1h",
+  "4h": "4h",
   "1d": "1d",
   "1wk": "1w",
 };
@@ -60,4 +61,13 @@ export function mergeLiveCandle<T extends LiveChartCandle>(history: T[], live: L
   if (previous.time === live.time) return [...history.slice(0, -1), live as T];
   if (live.time > previous.time) return [...history, live as T];
   return history;
+}
+
+/** يدمج دفعة تاريخية أقدم مع الدفعة الحالية بترتيب زمني ومن دون تكرار الشموع. */
+export function mergeHistoricalCandles<T extends LiveChartCandle>(current: T[], older: T[]): T[] {
+  const byTime = new Map<number, T>();
+  for (const candle of older) byTime.set(candle.time, candle);
+  // الدفعة الحالية أدق عند تداخل الحد الفاصل، لذلك تتغلب على الأقدم.
+  for (const candle of current) byTime.set(candle.time, candle);
+  return Array.from(byTime.values()).sort((left, right) => left.time - right.time);
 }

@@ -4,38 +4,44 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } from "@shared/movingAverageCrossover";
 import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStructure";
-import { getBinanceKlineStream, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
+import { getBinanceKlineStream, mergeHistoricalCandles, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
 import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences, type ChartLayerPreferences, type ChartPreferences } from "@shared/chartPreferences";
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
 import { getChartOverlayDensity } from "@/lib/chartOverlayDensity";
 import { getChartFullscreenPortalContainer, isChartFullscreenTarget, requestChartFullscreen, type ChartFullscreenMode } from "@/lib/chartFullscreen";
 import { countEnabledIctLayers, ICT_LAYER_CONTROLS } from "@/lib/chartMobileControls";
+import { getFitContentKey } from "@/lib/chartViewport";
+import { CHART_INTERVALS, chartIntervalStorageKey, isStoredChartInterval } from "@/lib/chartIntervalPreference";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateConfluenceIct, type ConfluenceIctSettings } from "@shared/confluenceIct";
 import { Maximize2, Minimize2, SlidersHorizontal } from "lucide-react";
 import {
   CandlestickSeries,
+  createTextWatermark,
   createSeriesMarkers,
   createChart,
   CrosshairMode,
   HistogramSeries,
   IChartApi,
   IPriceLine,
+  IPaneApi,
+  ITextWatermarkPluginApi,
   ISeriesApi,
   ISeriesMarkersPluginApi,
   LineSeries,
   LineStyle,
+  PriceScaleMode,
   type SeriesMarker,
   type DeepPartial,
   type Time,
 } from "lightweight-charts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const candleIntervals = ["1m", "5m", "15m", "60m", "1d", "1wk", "1mo"] as const;
+const candleIntervals = CHART_INTERVALS;
 type ChartInterval = (typeof candleIntervals)[number];
-const displayLabel: Record<string, string> = { "1m": "1m", "5m": "5m", "15m": "15m", "60m": "1h", "1d": "1d", "1wk": "1w", "1mo": "1M" };
+const displayLabel: Record<string, string> = { "1m": "1m", "5m": "5m", "15m": "15m", "60m": "1h", "4h": "4h", "1d": "1d", "1wk": "1w", "1mo": "1M" };
 
 const chartTheme: DeepPartial<import("lightweight-charts").ChartOptions> = {
   layout: {
@@ -52,12 +58,13 @@ const chartTheme: DeepPartial<import("lightweight-charts").ChartOptions> = {
   rightPriceScale: { borderColor: "rgba(141,162,181,0.12)" },
 };
 
-function intervalToRange(interval: ChartInterval): "1d" | "5d" | "1mo" | "6mo" | "2y" | "5y" {
+function intervalToRange(interval: ChartInterval): "1d" | "5d" | "1mo" | "3mo" | "6mo" | "2y" | "5y" {
   switch (interval) {
     case "1m": return "1d";
     case "5m":
     case "15m": return "5d";
     case "60m": return "5d";
+    case "4h": return "3mo";
     case "1d": return "6mo";
     case "1wk": return "2y";
     case "1mo": return "5y";
@@ -117,6 +124,7 @@ type ProposedRiskLevels = { stopLoss: string; takeProfit: string; stopLossSource
 export function CandlestickChart(props: { symbol: string; exchange: string; onCrossoverChange?: (crossover: MovingAverageCrossover | null, interval: ChartInterval) => void; proposedRiskLevels?: ProposedRiskLevels | null }) {
   const { symbol, exchange, onCrossoverChange, proposedRiskLevels } = props;
   const { isAuthenticated } = useAuth();
+  const utils = trpc.useUtils();
   const [interval, setInterval] = useState<ChartInterval>("1d");
   const [preferences, setPreferences] = useState<ChartPreferences>(DEFAULT_CHART_PREFERENCES);
   const [showConfluenceSettings, setShowConfluenceSettings] = useState(false);
@@ -130,12 +138,20 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
   const liveStreamUrl = useMemo(() => getBinanceKlineStream(symbol, exchange, interval), [symbol, exchange, interval]);
   const [liveCandle, setLiveCandle] = useState<LiveChartCandle | null>(null);
+  const [olderHistoricalCandles, setOlderHistoricalCandles] = useState<LiveChartCandle[]>([]);
+  const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const [liveStatus, setLiveStatus] = useState<ChartLiveProviderStatus>("delayed");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [chartWidth, setChartWidth] = useState(0);
   const [settledChartWidth, setSettledChartWidth] = useState(0);
   const [isChartFullscreen, setIsChartFullscreen] = useState(false);
   const [chartFullscreenMode, setChartFullscreenMode] = useState<ChartFullscreenMode | null>(null);
+  const pendingFitContentKeyRef = useRef<string | null>(null);
+  const chartCandlesRef = useRef<LiveChartCandle[]>([]);
+  const isLoadingOlderHistoryRef = useRef(false);
+  const hasExhaustedOlderHistoryRef = useRef(false);
+  const loadOlderHistoryRef = useRef<() => void>(() => undefined);
+  const watermarkRef = useRef<ITextWatermarkPluginApi<Time> | null>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => setSettledChartWidth(chartWidth), 150);
     return () => window.clearTimeout(timer);
@@ -151,7 +167,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     { enabled: isAuthenticated && Boolean(symbol) && Boolean(exchange) && exchange.toUpperCase() !== "BINANCE", refetchInterval: 2_500, refetchOnWindowFocus: true },
   );
   const historicalCandles = candlesQuery.data?.candles ?? [];
-  const chartCandles = useMemo(() => mergeLiveCandle(historicalCandles, liveCandle), [historicalCandles, liveCandle]);
+  const mergedHistoricalCandles = useMemo(() => mergeHistoricalCandles(historicalCandles, olderHistoricalCandles), [historicalCandles, olderHistoricalCandles]);
+  const chartCandles = useMemo(() => mergeLiveCandle(mergedHistoricalCandles, liveCandle), [mergedHistoricalCandles, liveCandle]);
   const confluenceResult = useMemo(
     () => calculateConfluenceIct(chartCandles, preferences.confluenceIct.settings),
     [chartCandles, preferences.confluenceIct.settings],
@@ -173,6 +190,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const structureAlertInterval = useMemo<"5m" | "15m" | "1h" | "4h" | "1d" | "1wk" | null>(() => {
     if (interval === "5m" || interval === "15m" || interval === "1d" || interval === "1wk") return interval;
     if (interval === "60m") return "1h";
+    if (interval === "4h") return "4h";
     return null;
   }, [interval]);
   const activeStructureAlerts = useMemo(
@@ -185,6 +203,11 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       setPreferences(normalizeChartPreferences(chartPreferencesQuery.data));
     }
   }, [chartPreferencesQuery.data]);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(chartIntervalStorageKey(exchange, symbol));
+    if (isStoredChartInterval(stored)) setInterval(stored);
+  }, [exchange, symbol]);
 
   useEffect(() => {
     onCrossoverChange?.(latestCrossover, interval);
@@ -225,7 +248,6 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       const chart = chartRef.current;
       if (!container || !chart) return;
       chart.applyOptions({ width: container.clientWidth, height: getChartViewportHeight(container.clientHeight) });
-      chart.timeScale().fitContent();
     });
     return () => window.cancelAnimationFrame(frame);
   }, [isChartFullscreen]);
@@ -277,6 +299,45 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     });
   }, [candlesQuery.data?.candles, exchange, twelveLiveQuote.data]);
 
+  useEffect(() => {
+    chartCandlesRef.current = chartCandles;
+  }, [chartCandles]);
+
+  useEffect(() => {
+    setOlderHistoricalCandles([]);
+    isLoadingOlderHistoryRef.current = false;
+    hasExhaustedOlderHistoryRef.current = false;
+    setIsLoadingOlderHistory(false);
+  }, [stableKey]);
+
+  useEffect(() => {
+    loadOlderHistoryRef.current = () => {
+      const current = chartCandlesRef.current;
+      const oldest = current[0];
+      if (!oldest || isLoadingOlderHistoryRef.current || hasExhaustedOlderHistoryRef.current || !canLoadChartData) return;
+
+      isLoadingOlderHistoryRef.current = true;
+      setIsLoadingOlderHistory(true);
+      void utils.market.candles
+        .fetch({ symbol, exchange, interval, range: intervalToRange(interval), limit: adaptiveCandleLimit, before: Number(oldest.time) })
+        .then(history => {
+          const strictlyOlder = history.candles.filter(candle => Number(candle.time) < Number(oldest.time));
+          if (strictlyOlder.length === 0) {
+            hasExhaustedOlderHistoryRef.current = true;
+            return;
+          }
+          setOlderHistoricalCandles(previous => mergeHistoricalCandles(previous, strictlyOlder));
+        })
+        .catch(error => {
+          console.warn("[Chart] failed to load older candle history", error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          isLoadingOlderHistoryRef.current = false;
+          setIsLoadingOlderHistory(false);
+        });
+    };
+  }, [adaptiveCandleLimit, canLoadChartData, exchange, interval, symbol, utils.market.candles]);
+
   // Create chart once per container
   useEffect(() => {
     const container = containerRef.current;
@@ -286,7 +347,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       width: container.clientWidth,
       height: initialHeight,
       ...chartTheme,
-      rightPriceScale: { borderColor: "rgba(141,162,181,0.12)" },
+      rightPriceScale: { borderColor: "rgba(141,162,181,0.12)", mode: preferences.priceScaleMode === "logarithmic" ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal },
     });
     const candles = chart.addSeries(CandlestickSeries, {
       upColor: "#16a34a",
@@ -328,6 +389,11 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     candleSeriesRef.current = candles;
     overlaysRef.current = overlays;
     markersRef.current = createSeriesMarkers(candles);
+    watermarkRef.current = createTextWatermark<Time>(chart.panes()[0] as IPaneApi<Time>, {
+      horzAlign: "center",
+      vertAlign: "center",
+      lines: [{ text: `${symbol} · ${displayLabel[interval]}`, color: "rgba(141,162,181,0.1)", fontSize: 28, fontFamily: "IBM Plex Mono" }],
+    });
 
     const resizeObserver = new ResizeObserver(entries => {
       const entry = entries[0];
@@ -339,19 +405,40 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       }
     });
     resizeObserver.observe(container);
+    const handleVisibleRangeChange = (range: { from: number; to: number } | null) => {
+      // عند الاقتراب من أقدم 20 شمعة نطلب دفعة تاريخية أقدم دون تغيير عرض المستخدم.
+      if (range && range.from <= 20) loadOlderHistoryRef.current();
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
     setChartWidth(Math.round(container.clientWidth));
     return () => {
       resizeObserver.disconnect();
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
       overlaysRef.current = null;
       markersRef.current = null;
+      watermarkRef.current?.detach();
+      watermarkRef.current = null;
       decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [], indicatorLines: [] };
     };
   }, []);
 
+  useEffect(() => {
+    chartRef.current?.priceScale("right").applyOptions({
+      mode: preferences.priceScaleMode === "logarithmic" ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+    });
+    watermarkRef.current?.applyOptions({
+      lines: [{ text: `${symbol} · ${displayLabel[interval]}`, color: "rgba(141,162,181,0.1)", fontSize: 28, fontFamily: "IBM Plex Mono" }],
+    });
+  }, [interval, preferences.priceScaleMode, symbol]);
+
   // Re-apply visibility whenever toggles or data change
+  useEffect(() => {
+    pendingFitContentKeyRef.current = stableKey;
+  }, [stableKey]);
+
   useEffect(() => {
     const data = chartCandles;
     const candlesSeries = candleSeriesRef.current;
@@ -557,11 +644,39 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       overlays.volume.applyOptions({ visible: false });
     }
 
-    chart.timeScale().fitContent();
   }, [stableKey, chartCandles, chartWidth, confluenceResult, exchange, preferences.confluenceIct, proposedRiskLevels, savedSignalsQuery.data, symbol, visible]);
+
+  // لا نعيد ضبط زوم/تمرير المستخدم مع بث سعر حي أو تبديل طبقات المؤشر.
+  // يطبّق fitContent فقط بعد وصول بيانات الرمز أو البورصة أو الإطار الجديد.
+  useEffect(() => {
+    const chart = chartRef.current;
+    const fitKey = getFitContentKey(
+      pendingFitContentKeyRef.current,
+      stableKey,
+      candlesQuery.data?.interval === interval && historicalCandles.length > 0,
+    );
+    if (!chart || !fitKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      chart.timeScale().fitContent();
+      pendingFitContentKeyRef.current = null;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [candlesQuery.data?.interval, historicalCandles.length, interval, stableKey]);
 
   const toggle = (key: keyof ChartLayerPreferences) => {
     const next = { ...preferences, layers: { ...preferences.layers, [key]: !preferences.layers[key] } };
+    setPreferences(next);
+    saveChartPreferences.mutate(next);
+  };
+  const selectInterval = (nextInterval: ChartInterval) => {
+    setInterval(nextInterval);
+    window.localStorage.setItem(chartIntervalStorageKey(exchange, symbol), nextInterval);
+  };
+  const togglePriceScaleMode = () => {
+    const next: ChartPreferences = {
+      ...preferences,
+      priceScaleMode: preferences.priceScaleMode === "logarithmic" ? "normal" : "logarithmic",
+    };
     setPreferences(next);
     saveChartPreferences.mutate(next);
   };
@@ -604,7 +719,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                 <button
                   key={item}
                   type="button"
-                  onClick={() => setInterval(item)}
+                  onClick={() => selectInterval(item)}
                   className={`min-h-10 rounded-md px-1.5 py-1 text-xs font-mono transition-colors duration-150 sm:min-h-0 sm:px-2.5 ${interval === item ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   {displayLabel[item] ?? item}
@@ -652,6 +767,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <button type="button" onClick={() => setShowConfluenceSettings(open => !open)} className="hidden min-h-10 rounded-lg border border-primary/25 bg-primary/[0.08] px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/[0.14] sm:inline-flex sm:items-center">
               {showConfluenceSettings ? "إخفاء إعدادات ICT" : "إعدادات ICT"}
             </button>
+            <button type="button" onClick={togglePriceScaleMode} aria-pressed={preferences.priceScaleMode === "logarithmic"} title="تبديل المقياس اللوغاريتمي" className={`inline-flex min-h-10 items-center justify-center rounded-lg border px-3 text-xs font-medium transition-colors ${preferences.priceScaleMode === "logarithmic" ? "border-primary/35 bg-primary/15 text-primary" : "border-white/[0.12] bg-white/[0.04] text-muted-foreground hover:text-foreground"}`}>
+              Log
+            </button>
             <button type="button" onClick={() => void toggleChartFullscreen()} aria-label={isChartFullscreen ? "الخروج من ملء شاشة المخطط" : "عرض المخطط بملء الشاشة"} title={isChartFullscreen ? "الخروج من ملء الشاشة" : "ملء الشاشة"} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 text-xs font-medium text-foreground transition-colors hover:bg-white/[0.09]">
               {isChartFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}<span className="sm:hidden">{isChartFullscreen ? "خروج" : "ملء الشاشة"}</span>
             </button>
@@ -674,12 +792,24 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         ) : null}
         <div className={`relative overflow-hidden rounded-xl ${isChartFullscreen ? "min-h-0 flex-1" : "h-[300px] min-h-[220px] sm:h-[380px]"}`}>
           <div ref={containerRef} className="h-full w-full" />
+          {isLoadingOlderHistory ? (
+            <div className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-md border border-white/[0.1] bg-black/65 px-2 py-1 text-[11px] text-muted-foreground shadow-lg">
+              <Spinner className="size-3 text-primary" /> تحميل تاريخ أقدم…
+            </div>
+          ) : null}
           {candlesQuery.isLoading && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/45 backdrop-blur-[2px]">
               <Spinner className="size-5 text-primary" />
               <span className="mr-2 text-sm text-muted-foreground">جارٍ جلب الشموع التاريخية…</span>
             </div>
           )}
+          {candlesQuery.isFetching && !candlesQuery.isLoading ? (
+            <div className="pointer-events-none absolute inset-0 rounded-xl bg-black/20 backdrop-blur-[1px] transition-opacity">
+              <div className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-[11px] text-muted-foreground">
+                <Spinner className="size-3 text-primary" /> تحديث الإطار…
+              </div>
+            </div>
+          ) : null}
           {candlesQuery.isError && (
             <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/45 backdrop-blur-[2px]">
               <p className="text-sm font-medium text-destructive">تعذّر تحميل بيانات الأسعار التاريخية</p>

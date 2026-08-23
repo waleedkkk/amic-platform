@@ -71,4 +71,13 @@ describe("checkActiveStructureAlerts", () => {
 
     expect(mocks.createStructureAlertNotification).not.toHaveBeenCalled();
   });
+
+  it("يقيم تنبيه 4h بشموع أربع ساعات حقيقية وبنطاق تاريخي مناسب", async () => {
+    mocks.listActiveStructureAlerts.mockResolvedValue([{ ...activeBreakoutAlert, alert: { ...activeBreakoutAlert.alert, interval: "4h" } }]);
+    mocks.markStructureAlertTriggered.mockResolvedValue(false);
+
+    await checkActiveStructureAlerts();
+
+    expect(mocks.getCandleHistoryCached).toHaveBeenCalledWith("BTCUSDT", "BINANCE", "4h", "3mo");
+  });
 });

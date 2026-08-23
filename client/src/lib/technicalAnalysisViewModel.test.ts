@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MultiTimeframeAnalysis, TechnicalAnalysis } from "@shared/technicalAnalysis";
-import { createSavedAnalysisPayload, describeConfluenceFrame, getConfluenceReferencePrice, getTechnicalDetailGroups, getTechnicalMetricCards, getUnavailableMetricLabels } from "./technicalAnalysisViewModel";
+import { createSavedAnalysisPayload, describeConfluenceFrame, getConfluenceReferencePrice, getTechnicalDetailGroups, getTechnicalMetricCards, getUnavailableMetricLabels, resolveConfluenceDisplayPrice } from "./technicalAnalysisViewModel";
 
 const analysis: TechnicalAnalysis = {
   schemaVersion: 1, source: "tradingview-mcp", fetchedAt: "2026-08-22T00:00:00.000Z", sourceTimestamp: null, symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "1h",
@@ -47,6 +47,8 @@ describe("نموذج عرض عقد التحليل المعياري", () => {
     expect(describeConfluenceFrame(multi.frames["1h"])).toBe("صاعد (+0.60)");
     expect(getConfluenceReferencePrice(multi)).toEqual({ price: 77_000, timeframe: "1h" });
     expect(getConfluenceReferencePrice({ ...multi, frames: { ...multi.frames, "1h": { ...multi.frames["1h"]!, price: null } } })).toEqual({ price: 76_800, timeframe: "4h" });
+    expect(resolveConfluenceDisplayPrice(undefined, multi)).toEqual({ price: 77_000, source: "frame", timeframe: "1h" });
+    expect(resolveConfluenceDisplayPrice(77_250, multi)).toEqual({ price: 77_250, source: "live", timeframe: null });
   });
 
   it("يغلف العقد عند حفظ الإشارة مع فصل سياق المخطط عن بيانات المزود", () => {

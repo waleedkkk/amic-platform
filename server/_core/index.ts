@@ -8,6 +8,9 @@ import { getRequiredJwtSecret } from "./env";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { handleMetalAlertsSchedule } from "../scheduledMetalAlerts";
+import { handleEconomicCalendarSchedule } from "../scheduledEconomicCalendar";
+import { handleDailyMarketDigestSchedule } from "../scheduledDailyMarketDigest";
+import { handleMarketSnapshotCleanupSchedule } from "../scheduledMarketSnapshotCleanup";
 import { serveStatic, setupVite } from "./vite";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -47,6 +50,9 @@ async function startServer() {
     })
   );
   app.post("/api/scheduled/metal-alerts", handleMetalAlertsSchedule);
+  app.post("/api/scheduled/economic-calendar", handleEconomicCalendarSchedule);
+  app.post("/api/scheduled/daily-market-digest", handleDailyMarketDigestSchedule);
+  app.post("/api/scheduled/market-snapshot-cleanup", handleMarketSnapshotCleanupSchedule);
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

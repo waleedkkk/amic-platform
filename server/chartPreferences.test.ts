@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CHART_LAYERS, normalizeChartLayers, normalizeChartPreferences } from "./chartPreferences";
+import { DEFAULT_CHART_LAYERS, normalizeChartLayers, normalizeChartPreferences } from "../shared/chartPreferences";
 
 describe("normalizeChartLayers", () => {
   it("يعيد الإعدادات الافتراضية عند تمرير قيمة غير صالحة", () => {
@@ -29,5 +29,10 @@ describe("normalizeChartLayers", () => {
     expect(result.layers.volume).toBe(false);
     expect(result.confluenceIct.trend).toBe(false);
     expect(result.confluenceIct.settings).toMatchObject({ mode: "scalping", preset: "aggressive" });
+  });
+
+  it("يحفظ ويستعيد تفضيل المقياس اللوغاريتمي مع رفض القيم غير الصالحة", () => {
+    expect(normalizeChartPreferences({ priceScaleMode: "logarithmic" }).priceScaleMode).toBe("logarithmic");
+    expect(normalizeChartPreferences({ priceScaleMode: "unsupported" }).priceScaleMode).toBe("normal");
   });
 });
