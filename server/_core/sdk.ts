@@ -81,7 +81,7 @@ const createOAuthHttpClient = (): AxiosInstance =>
     timeout: AXIOS_TIMEOUT_MS,
   });
 
-class SDKServer {
+export class SDKServer {
   private readonly client: AxiosInstance;
   private readonly oauthService: OAuthService;
 
@@ -232,11 +232,12 @@ class SDKServer {
   }
 
   async getUserInfoWithJwt(
-    jwtToken: string
+    jwtToken: string,
+    projectId = ENV.appId
   ): Promise<GetUserInfoWithJwtResponse> {
     const payload: GetUserInfoWithJwtRequest = {
       jwtToken,
-      projectId: ENV.appId,
+      projectId,
     };
 
     const { data } = await this.client.post<GetUserInfoWithJwtResponse>(
@@ -277,7 +278,9 @@ class SDKServer {
     }
 
     if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
-      const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
+      // مهمة Heartbeat تحمل appId موقعًا داخل الكوكي نفسه. استخدامه يمنع رفض
+      // هوية cron عندما تختلف قيمة بيئة النشر القديمة عن معرّف المشروع للمهمة.
+      const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "", session.appId);
       const taskUid = userInfo.taskUid ?? null;
       if (!taskUid) {
         throw ForbiddenError("Cron session missing task_uid");
@@ -292,7 +295,7 @@ class SDKServer {
     // If user not in DB, sync from OAuth server automatically
     if (!user) {
       try {
-        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
+        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "", session.appId);
         await db.upsertUser({
           openId: userInfo.openId,
           name: userInfo.name || null,
