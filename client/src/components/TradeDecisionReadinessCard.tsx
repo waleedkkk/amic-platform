@@ -1,0 +1,12 @@
+import { assessTradeDecisionReadiness, type PaperTradeDraft, type RiskLevelSource } from "@/lib/paperTradeDraft";
+import { CheckCircle2, CircleAlert, ClipboardCheck, ShieldAlert } from "lucide-react";
+import { useMemo } from "react";
+
+type DraftInput = Pick<PaperTradeDraft, "symbol" | "exchange" | "side" | "quantity" | "entryPrice" | "stopLoss" | "takeProfit">;
+
+export function TradeDecisionReadinessCard({ draft, riskSources }: { draft: DraftInput; riskSources: { stopLossSource: RiskLevelSource; takeProfitSource: RiskLevelSource } | null }) {
+  const readiness = useMemo(() => assessTradeDecisionReadiness({ ...draft, riskSources: riskSources ?? undefined }), [draft, riskSources]);
+  const style = readiness.status === "ready" ? "border-emerald-400/25 bg-emerald-400/[0.06] text-emerald-100" : readiness.status === "needs_correction" ? "border-rose-400/35 bg-rose-400/[0.08] text-rose-100" : "border-amber-400/30 bg-amber-400/[0.08] text-amber-100";
+  const Icon = readiness.status === "ready" ? CheckCircle2 : readiness.status === "needs_correction" ? CircleAlert : ClipboardCheck;
+  return <section className={`sm:col-span-2 rounded-xl border p-4 ${style}`} aria-live="polite"><div className="flex items-start gap-3"><Icon className="mt-0.5 size-5 shrink-0" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold">جاهزية القرار: {readiness.title}</p><span className="font-mono text-sm">{readiness.riskRewardRatio ? `${readiness.riskRewardRatio.toFixed(2)} : 1` : "R/R —"}</span></div><p className="mt-1 text-xs leading-5 opacity-90">{readiness.summary}</p>{readiness.missing.length ? <p className="mt-2 text-xs"><span className="font-semibold">ينقص:</span> {readiness.missing.join("، ")}</p> : null}{readiness.warnings.length ? <ul className="mt-2 list-disc space-y-1 pr-4 text-xs leading-5">{readiness.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul> : null}</div></div><div className="mt-3 rounded-lg border border-black/10 bg-black/10 p-3 text-xs leading-5"><div className="flex items-center gap-2 font-semibold"><ShieldAlert className="size-3.5" />مصدر مستويات المخاطرة</div>{readiness.sourceNotes.map(note => <p key={note} className="mt-1 opacity-90">{note}</p>)}</div><p className="mt-3 text-[11px] leading-5 opacity-80">هذه بطاقة مراجعة تعليمية لمسودة محاكاة؛ لا تمثل توصية استثمارية ولا تفتح صفقة تلقائيًا.</p></section>;
+}

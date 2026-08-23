@@ -4,6 +4,13 @@ import type { TrpcContext } from "../_core/context";
 const databaseMocks = vi.hoisted(() => ({
   getMarketSnapshot: vi.fn(),
   saveMarketSnapshot: vi.fn(),
+  getUserMarketPulsePreferences: vi.fn(),
+  saveUserMarketPulsePreferences: vi.fn(),
+  getUserAnalysisExternalContextPreferences: vi.fn(),
+  saveUserAnalysisExternalContextPreferences: vi.fn(),
+  listUserWatchlist: vi.fn(),
+  addUserWatchlistItem: vi.fn(),
+  removeUserWatchlistItem: vi.fn(),
 }));
 
 const mcpMocks = vi.hoisted(() => ({
@@ -19,6 +26,22 @@ import { cached, marketRouter } from "./market";
 
 const publicContext: TrpcContext = {
   user: null,
+  req: {} as TrpcContext["req"],
+  res: {} as TrpcContext["res"],
+};
+
+const authenticatedContext: TrpcContext = {
+  user: {
+    id: 77,
+    openId: "pulse-user",
+    name: "Pulse user",
+    email: "pulse@example.com",
+    loginMethod: "email",
+    role: "user",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastSignedIn: new Date(),
+  },
   req: {} as TrpcContext["req"],
   res: {} as TrpcContext["res"],
 };
@@ -87,5 +110,52 @@ describe("marketRouter.analysis", () => {
 
     resolveLoad({ value: "shared" });
     await expect(Promise.all([first, second])).resolves.toEqual([{ value: "shared" }, { value: "shared" }]);
+  });
+});
+
+describe("marketRouter.pulse", () => {
+  it("يعيد أقسامًا افتراضية وقائمة المستخدم الحالي فقط عند غياب تفضيل محفوظ", async () => {
+    databaseMocks.getUserMarketPulsePreferences.mockResolvedValue(undefined);
+    databaseMocks.listUserWatchlist.mockResolvedValue([{ symbol: "BTCUSDT", exchange: "BINANCE", assetClass: "crypto" }]);
+    const caller = marketRouter.createCaller(authenticatedContext);
+
+    await expect(caller.pulse.getPreferences()).resolves.toMatchObject({
+      sections: ["cryptoGainers", "cryptoLosers", "stockGainers", "stockLosers"],
+      watchlist: [{ symbol: "BTCUSDT", exchange: "BINANCE" }],
+    });
+    expect(databaseMocks.getUserMarketPulsePreferences).toHaveBeenCalledWith(77);
+    expect(databaseMocks.listUserWatchlist).toHaveBeenCalledWith(77);
+  });
+
+  it("يطبع الأقسام المحفوظة ويصنف رمز المستخدم وفق سوقه", async () => {
+    databaseMocks.saveUserMarketPulsePreferences.mockResolvedValue({ sections: ["stockLosers"] });
+    databaseMocks.listUserWatchlist.mockResolvedValue([]);
+    databaseMocks.addUserWatchlistItem.mockResolvedValue([{ symbol: "XAUUSD", exchange: "FX", assetClass: "futures" }]);
+    const caller = marketRouter.createCaller(authenticatedContext);
+
+    await caller.pulse.saveSections({ sections: ["stockLosers", "stockLosers"] });
+    expect(databaseMocks.saveUserMarketPulsePreferences).toHaveBeenCalledWith(77, ["stockLosers"]);
+
+    await caller.pulse.addSymbol({ symbol: "xauusd", exchange: "fx" });
+    expect(databaseMocks.addUserWatchlistItem).toHaveBeenCalledWith(77, { symbol: "XAUUSD", exchange: "FX", assetClass: "futures" });
+  });
+});
+
+describe("marketRouter.externalContext", () => {
+  it("يعيد تفضيلات السياق للحساب الحالي فقط عند عدم وجود إعدادات محفوظة", async () => {
+    databaseMocks.getUserAnalysisExternalContextPreferences.mockResolvedValue(undefined);
+    const caller = marketRouter.createCaller(authenticatedContext);
+
+    await expect(caller.externalContext.getPreferences()).resolves.toEqual({ references: [] });
+    expect(databaseMocks.getUserAnalysisExternalContextPreferences).toHaveBeenCalledWith(77);
+  });
+
+  it("يطبع الرموز المرجعية ويحفظها تحت حساب المستخدم الحالي", async () => {
+    databaseMocks.saveUserAnalysisExternalContextPreferences.mockResolvedValue({ references: [{ symbol: "XAGUSD", exchange: "FX" }] });
+    const caller = marketRouter.createCaller(authenticatedContext);
+
+    await caller.externalContext.savePreferences({ references: [{ symbol: "xagusd", exchange: "fx" }, { symbol: "XAGUSD", exchange: "FX" }] });
+
+    expect(databaseMocks.saveUserAnalysisExternalContextPreferences).toHaveBeenCalledWith(77, [{ symbol: "XAGUSD", exchange: "FX" }]);
   });
 });

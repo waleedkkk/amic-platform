@@ -212,12 +212,40 @@ export const structureAlerts = mysqlTable(
   }),
 );
 
+export const structureContextAlerts = mysqlTable(
+  "structureContextAlerts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    symbol: varchar("symbol", { length: 32 }).notNull(),
+    exchange: varchar("exchange", { length: 32 }).notNull(),
+    interval: mysqlEnum("interval", ["5m", "15m", "1h", "4h", "1d", "1wk"]).notNull(),
+    sourceKind: mysqlEnum("sourceKind", ["support", "resistance", "demand_zone", "supply_zone"]).notNull(),
+    sourceLabel: varchar("sourceLabel", { length: 160 }).notNull(),
+    referencePrice: decimal("referencePrice", { precision: 18, scale: 8 }).notNull(),
+    rangeLow: decimal("rangeLow", { precision: 18, scale: 8 }),
+    rangeHigh: decimal("rangeHigh", { precision: 18, scale: 8 }),
+    invalidationPrice: decimal("invalidationPrice", { precision: 18, scale: 8 }),
+    eventType: mysqlEnum("eventType", ["approach", "touch", "invalidation"]).notNull(),
+    proximityBps: int("proximityBps").notNull().default(15),
+    status: mysqlEnum("status", ["active", "triggered", "cancelled"]).notNull().default("active"),
+    triggeredPrice: decimal("triggeredPrice", { precision: 18, scale: 8 }),
+    triggeredAt: timestamp("triggeredAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userStatusLookup: index("structure_context_alerts_user_status_idx").on(table.userId, table.status),
+    monitorLookup: index("structure_context_alerts_monitor_idx").on(table.status, table.symbol, table.exchange),
+  }),
+);
+
 export const userNotifications = mysqlTable(
   "userNotifications",
   {
     id: int("id").autoincrement().primaryKey(),
     userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
-    category: mysqlEnum("category", ["metal_alert", "structure_alert"]).notNull(),
+    category: mysqlEnum("category", ["metal_alert", "structure_alert", "structure_context_alert"]).notNull(),
     title: varchar("title", { length: 180 }).notNull(),
     content: text("content").notNull(),
     metadata: json("metadata").notNull(),
@@ -242,6 +270,18 @@ export const userTelegramSettings = mysqlTable(
 export const chartPreferences = mysqlTable("chartPreferences", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   layers: json("layers").$type<Record<string, unknown>>().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const marketPulsePreferences = mysqlTable("marketPulsePreferences", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  sections: json("sections").$type<string[]>().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const analysisExternalContextPreferences = mysqlTable("analysisExternalContextPreferences", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  references: json("references").$type<Array<{ symbol: string; exchange: string }>>().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
@@ -304,6 +344,9 @@ export type AiProviderSetting = typeof aiProviderSettings.$inferSelect;
 export type AiConversationMessage = typeof aiConversationMessages.$inferSelect;
 export type MetalAlert = typeof metalAlerts.$inferSelect;
 export type StructureAlert = typeof structureAlerts.$inferSelect;
+export type StructureContextAlert = typeof structureContextAlerts.$inferSelect;
 export type UserNotification = typeof userNotifications.$inferSelect;
 export type ChartPreferences = typeof chartPreferences.$inferSelect;
+export type MarketPulsePreferences = typeof marketPulsePreferences.$inferSelect;
+export type AnalysisExternalContextPreferences = typeof analysisExternalContextPreferences.$inferSelect;
 export type EconomicCalendarSubscription = typeof economicCalendarSubscriptions.$inferSelect;

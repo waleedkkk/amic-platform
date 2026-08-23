@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessTradeRisk, makeAnalysisTradeDraft, suggestRiskLevels } from "./paperTradeDraft";
+import { assessTradeDecisionReadiness, assessTradeRisk, makeAnalysisTradeDraft, suggestRiskLevels } from "./paperTradeDraft";
 
 describe("suggestRiskLevels", () => {
   it("uses the nearest valid support and resistance for a long draft", () => {
@@ -39,5 +39,11 @@ describe("suggestRiskLevels", () => {
       "للبيع، يجب أن يكون وقف الخسارة أعلى من سعر الدخول.",
       "للبيع، يجب أن يكون جني الربح أقل من سعر الدخول.",
     ]);
+  });
+
+  it("يصف الجاهزية دون توصية ويكشف العناصر الناقصة أو القيم التي تحتاج تصحيحًا", () => {
+    expect(assessTradeDecisionReadiness({ symbol: "XAUUSD", exchange: "FX", side: "long", quantity: "1", entryPrice: "4000", stopLoss: "3990", takeProfit: "4020" })).toMatchObject({ status: "ready", riskRewardRatio: 2 });
+    expect(assessTradeDecisionReadiness({ symbol: "", exchange: "FX", side: "long", quantity: "", entryPrice: "", stopLoss: "", takeProfit: "" })).toMatchObject({ status: "incomplete", missing: expect.arrayContaining(["الرمز", "الكمية الموجبة", "سعر الدخول"]) });
+    expect(assessTradeDecisionReadiness({ symbol: "XAUUSD", exchange: "FX", side: "long", quantity: "1", entryPrice: "4000", stopLoss: "4010", takeProfit: "3990" })).toMatchObject({ status: "needs_correction" });
   });
 });

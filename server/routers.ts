@@ -14,6 +14,7 @@ import {
 import { getDb } from "./db";
 import { aiRouter } from "./routers/ai";
 import { adminAiRouter } from "./routers/adminAi";
+import { alertCenterRouter } from "./routers/alertCenter";
 import { adminHeartbeatRouter } from "./routers/adminHeartbeat";
 import { backtestRouter } from "./routers/backtest";
 import { leaderboardRouter } from "./routers/leaderboard";
@@ -23,6 +24,7 @@ import { metalAlertsRouter } from "./routers/metalAlerts";
 import { paperTradingRouter } from "./routers/paperTrading";
 import { signalsRouter } from "./routers/signals";
 import { structureAlertsRouter } from "./routers/structureAlerts";
+import { structureContextAlertsRouter } from "./routers/structureContextAlerts";
 
 const emailInput = z.object({
   email: z.string().min(1).max(320),
@@ -77,10 +79,12 @@ export const appRouter = router({
       heartbeat: adminHeartbeatRouter,
     }),
   }),
+  alertCenter: alertCenterRouter,
   market: marketRouter,
   economicCalendar: economicCalendarRouter,
   metalAlerts: metalAlertsRouter,
   structureAlerts: structureAlertsRouter,
+  structureContextAlerts: structureContextAlertsRouter,
   paperTrading: paperTradingRouter,
   signals: signalsRouter,
   ai: aiRouter,

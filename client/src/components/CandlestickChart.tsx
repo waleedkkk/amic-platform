@@ -14,6 +14,8 @@ import { countEnabledIctLayers, ICT_LAYER_CONTROLS } from "@/lib/chartMobileCont
 import { getFitContentKey } from "@/lib/chartViewport";
 import { CHART_INTERVALS, chartIntervalStorageKey, isStoredChartInterval } from "@/lib/chartIntervalPreference";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
+import { StructureInsightPanel } from "@/components/StructureInsightPanel";
+import { describeCandleDataStatus, getMarketAssetProfile } from "@shared/marketAssetProfile";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateConfluenceIct, type ConfluenceIctSettings } from "@shared/confluenceIct";
 import { Maximize2, Minimize2, SlidersHorizontal } from "lucide-react";
@@ -185,7 +187,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const decorationsRef = useRef<StructureDecorations>({ levelLines: [], zoneLines: [], proposalLines: [], indicatorLines: [] });
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const [hasVolume, setHasVolume] = useState(false);
-  const [structureDetail, setStructureDetail] = useState<Pick<MarketStructure, "events" | "zones">>({ events: [], zones: [] });
+  const [structureDetail, setStructureDetail] = useState<Pick<MarketStructure, "events" | "levels" | "zones">>({ events: [], levels: [], zones: [] });
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const structureAlertInterval = useMemo<"5m" | "15m" | "1h" | "4h" | "1d" | "1wk" | null>(() => {
     if (interval === "5m" || interval === "15m" || interval === "1d" || interval === "1wk") return interval;
@@ -493,7 +495,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       })),
       { swingRadius: 2, levelTolerance: 0.003, confirmationBars: 3 },
     );
-    setStructureDetail({ events: structure.events.slice(-4).reverse(), zones: structure.zones.slice(-4).reverse() });
+    setStructureDetail({ events: structure.events.slice(-4).reverse(), levels: structure.levels.slice(-6).reverse(), zones: structure.zones.slice(-4).reverse() });
     const latestSupport = structure.levels.filter(level => level.kind === "support").sort((a, b) => b.createdAt - a.createdAt)[0];
     const latestResistance = structure.levels.filter(level => level.kind === "resistance").sort((a, b) => b.createdAt - a.createdAt)[0];
     const overlayDensity = getChartOverlayDensity(chartWidth);
@@ -690,6 +692,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   };
   const liveProvider = exchange.toUpperCase() === "BINANCE" ? "binance" : "twelve-data";
   const livePresentation = describeLiveProviderStatus(liveStatus, liveProvider);
+  const assetProfile = useMemo(() => getMarketAssetProfile(symbol, exchange), [exchange, symbol]);
+  const candleDataStatus = useMemo(() => describeCandleDataStatus(candlesQuery.data, interval), [candlesQuery.data, interval]);
+  const candleFetchedAtLabel = candleDataStatus.fetchedAt ? new Date(candleDataStatus.fetchedAt).toLocaleTimeString("ar-EG") : "—";
   const enabledIctLayerCount = countEnabledIctLayers(preferences.confluenceIct);
   const toggleChartFullscreen = async () => {
     const target = chartFullscreenRef.current;
@@ -778,6 +783,13 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             </span>
           </div>
         </div>
+        {assetProfile.prioritizedTechnicalStatus ? (
+          <div className={`mb-3 grid gap-2 rounded-xl border p-3 text-xs sm:grid-cols-[1.25fr_0.75fr_0.75fr] ${candleDataStatus.mode === "primary" ? "border-emerald-400/20 bg-emerald-400/[0.045]" : candleDataStatus.mode === "fallback" ? "border-amber-400/25 bg-amber-400/[0.05]" : "border-rose-400/25 bg-rose-400/[0.05]"}`}>
+            <div><p className="font-semibold text-foreground">{assetProfile.label} · حالة بيانات المخطط</p><p className="mt-1 leading-5 text-muted-foreground">{candleDataStatus.detail}</p></div>
+            <div><p className="text-muted-foreground">مصدر الشموع</p><p className="mt-1 font-mono text-foreground">{candleDataStatus.providerLabel}</p></div>
+            <div><p className="text-muted-foreground">آخر جلب</p><p className="mt-1 font-mono text-foreground">{candleFetchedAtLabel} <span className="mr-1 rounded bg-black/20 px-1.5 py-0.5 text-[10px]">{candleDataStatus.badge}</span></p></div>
+          </div>
+        ) : null}
         {showConfluenceSettings ? (
           <div className="mb-3 grid gap-3 rounded-xl border border-primary/15 bg-primary/[0.04] p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
             <label className="grid gap-1.5"><span className="text-muted-foreground">وضع التداول</span><select value={preferences.confluenceIct.settings.mode} onChange={event => updateConfluenceSetting("mode", event.target.value as ConfluenceIctSettings["mode"])} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 text-foreground"><option value="normal">Normal</option><option value="scalping">Scalping</option></select></label>
@@ -887,6 +899,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             ) : null}
           </div>
         ) : null}
+        {!preferences.confluenceIct.enabled && (visible.levels || visible.zones) ? <StructureInsightPanel symbol={symbol} exchange={exchange} interval={structureAlertInterval ?? "1h"} currentPrice={chartCandles.at(-1)?.close ?? candlesQuery.data?.regularMarketPrice ?? null} levels={structureDetail.levels} zones={structureDetail.zones} proposedRiskLevels={proposedRiskLevels} /> : null}
         {!preferences.confluenceIct.enabled ? <div className="mt-3 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>

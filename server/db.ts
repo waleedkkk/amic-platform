@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
 import {
   InsertSavedSignal,
+  analysisExternalContextPreferences,
   aiConversationMessages,
   aiMemorySettings,
   chartPreferences,
@@ -13,10 +14,12 @@ import {
   economicCalendarSubscriptions,
   InsertUser,
   marketSnapshotCleanupMonitorSettings,
+  marketPulsePreferences,
   marketSnapshots,
   metalAlertMonitorSettings,
   metalAlerts,
   structureAlerts,
+  structureContextAlerts,
   paperTrades,
   paperTradeCritiques,
   paperTradingLeaderboardProfiles,
@@ -395,6 +398,18 @@ export async function listUserWatchlist(userId: number) {
   return db.select().from(watchlists).where(eq(watchlists.userId, userId)).orderBy(desc(watchlists.createdAt));
 }
 
+export async function addUserWatchlistItem(userId: number, input: { symbol: string; exchange: string; assetClass: "crypto" | "stock" | "forex" | "futures" }) {
+  const db = await requireDb();
+  await db.insert(watchlists).values({ userId, ...input }).onDuplicateKeyUpdate({ set: { assetClass: input.assetClass } });
+  return listUserWatchlist(userId);
+}
+
+export async function removeUserWatchlistItem(userId: number, symbol: string, exchange: string) {
+  const db = await requireDb();
+  await db.delete(watchlists).where(and(eq(watchlists.userId, userId), eq(watchlists.symbol, symbol), eq(watchlists.exchange, exchange)));
+  return listUserWatchlist(userId);
+}
+
 export type MetalAlertInput = {
   metal: "XAUUSD" | "XAGUSD";
   direction: "above" | "below";
@@ -537,6 +552,30 @@ export async function saveUserChartPreferences(userId: number, preferences: Reco
   return { layers: preferences };
 }
 
+export async function getUserMarketPulsePreferences(userId: number) {
+  const db = await requireDb();
+  const [preferences] = await db.select().from(marketPulsePreferences).where(eq(marketPulsePreferences.userId, userId)).limit(1);
+  return preferences;
+}
+
+export async function saveUserMarketPulsePreferences(userId: number, sections: string[]) {
+  const db = await requireDb();
+  await db.insert(marketPulsePreferences).values({ userId, sections }).onDuplicateKeyUpdate({ set: { sections, updatedAt: new Date() } });
+  return { sections };
+}
+
+export async function getUserAnalysisExternalContextPreferences(userId: number) {
+  const db = await requireDb();
+  const [preferences] = await db.select().from(analysisExternalContextPreferences).where(eq(analysisExternalContextPreferences.userId, userId)).limit(1);
+  return preferences;
+}
+
+export async function saveUserAnalysisExternalContextPreferences(userId: number, references: Array<{ symbol: string; exchange: string }>) {
+  const db = await requireDb();
+  await db.insert(analysisExternalContextPreferences).values({ userId, references }).onDuplicateKeyUpdate({ set: { references, updatedAt: new Date() } });
+  return { references };
+}
+
 export async function listActiveMetalAlerts() {
   const db = await requireDb();
   return db
@@ -622,4 +661,77 @@ export async function markStructureAlertTriggered(alertId: number, input: { pric
 export async function createStructureAlertNotification(input: { userId: number; title: string; content: string; metadata: Record<string, unknown> }) {
   const db = await requireDb();
   await db.insert(userNotifications).values({ ...input, category: "structure_alert" });
+}
+
+export type StructureContextAlertInput = {
+  symbol: string;
+  exchange: string;
+  interval: "5m" | "15m" | "1h" | "4h" | "1d" | "1wk";
+  sourceKind: "support" | "resistance" | "demand_zone" | "supply_zone";
+  sourceLabel: string;
+  referencePrice: string;
+  rangeLow?: string | null;
+  rangeHigh?: string | null;
+  invalidationPrice?: string | null;
+  eventType: "approach" | "touch" | "invalidation";
+  proximityBps?: number;
+};
+
+function normalizeContextAlertPrice(value: string | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+  const price = new Decimal(value);
+  if (!price.isFinite() || price.lte(0)) throw new Error("سعر تنبيه السياق يجب أن يكون رقمًا موجبًا.");
+  return price.toFixed(8);
+}
+
+export async function listUserStructureContextAlerts(userId: number) {
+  const db = await requireDb();
+  return db.select().from(structureContextAlerts).where(eq(structureContextAlerts.userId, userId)).orderBy(desc(structureContextAlerts.createdAt));
+}
+
+export async function createUserStructureContextAlert(userId: number, input: StructureContextAlertInput) {
+  const db = await requireDb();
+  const referencePrice = normalizeContextAlertPrice(input.referencePrice);
+  const rangeLow = normalizeContextAlertPrice(input.rangeLow);
+  const rangeHigh = normalizeContextAlertPrice(input.rangeHigh);
+  const invalidationPrice = normalizeContextAlertPrice(input.invalidationPrice);
+  if (!referencePrice) throw new Error("سعر المستوى أو المنطقة مطلوب.");
+  if ((rangeLow && !rangeHigh) || (!rangeLow && rangeHigh)) throw new Error("نطاق المنطقة يحتاج حدًا أدنى وأعلى.");
+  if (rangeLow && rangeHigh && new Decimal(rangeLow).gt(rangeHigh)) throw new Error("الحد الأدنى للمنطقة يجب ألا يتجاوز الحد الأعلى.");
+  if (input.eventType === "invalidation" && !invalidationPrice) throw new Error("تنبيه الإبطال يحتاج سعر إبطال واضحًا.");
+  const result = await db.insert(structureContextAlerts).values({
+    userId,
+    ...input,
+    symbol: input.symbol.trim().toUpperCase(),
+    exchange: input.exchange.trim().toUpperCase(),
+    sourceLabel: input.sourceLabel.trim().slice(0, 160),
+    referencePrice,
+    rangeLow,
+    rangeHigh,
+    invalidationPrice,
+    proximityBps: Math.max(1, Math.min(100, input.proximityBps ?? 15)),
+  });
+  return { id: Number(result[0].insertId) };
+}
+
+export async function cancelUserStructureContextAlert(userId: number, alertId: number) {
+  const db = await requireDb();
+  await db.update(structureContextAlerts).set({ status: "cancelled" }).where(and(eq(structureContextAlerts.id, alertId), eq(structureContextAlerts.userId, userId), eq(structureContextAlerts.status, "active")));
+  return { success: true } as const;
+}
+
+export async function listActiveStructureContextAlerts() {
+  const db = await requireDb();
+  return db.select({ alert: structureContextAlerts, telegram: userTelegramSettings }).from(structureContextAlerts).leftJoin(userTelegramSettings, eq(structureContextAlerts.userId, userTelegramSettings.userId)).where(eq(structureContextAlerts.status, "active"));
+}
+
+export async function markStructureContextAlertTriggered(alertId: number, price: string) {
+  const db = await requireDb();
+  const result = await db.update(structureContextAlerts).set({ status: "triggered", triggeredPrice: price, triggeredAt: new Date() }).where(and(eq(structureContextAlerts.id, alertId), eq(structureContextAlerts.status, "active")));
+  return Number(result[0].affectedRows) > 0;
+}
+
+export async function createStructureContextAlertNotification(input: { userId: number; title: string; content: string; metadata: Record<string, unknown> }) {
+  const db = await requireDb();
+  await db.insert(userNotifications).values({ ...input, category: "structure_context_alert" });
 }

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AuthScreen } from "./AuthScreen";
-import { Bot, CalendarDays, CandlestickChart, ChartNoAxesCombined, FlaskConical, History, LayoutDashboard, LogOut, PanelLeft, ScanSearch, ShieldCheck, Sparkles, Trophy, WalletCards } from "lucide-react";
+import { BellRing, Bot, CalendarDays, CandlestickChart, ChartNoAxesCombined, FlaskConical, History, LayoutDashboard, LogOut, PanelLeft, ScanSearch, ShieldCheck, Sparkles, Trophy, WalletCards } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
@@ -15,6 +15,7 @@ import { useI18n, type TranslationKey } from "@/lib/i18n";
 type MenuItem = { icon: typeof LayoutDashboard; labelKey: TranslationKey; path: string };
 const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, labelKey: "marketPulse", path: "/" },
+  { icon: BellRing, labelKey: "alertCenter", path: "/alerts" },
   { icon: CandlestickChart, labelKey: "technicalAnalysis", path: "/analysis" },
   { icon: ChartNoAxesCombined, labelKey: "confluence", path: "/confluence" },
   { icon: CalendarDays, labelKey: "calendar", path: "/calendar" },

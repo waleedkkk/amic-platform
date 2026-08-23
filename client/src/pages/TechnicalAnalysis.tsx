@@ -5,6 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CandlestickChart as PriceChart } from "@/components/CandlestickChart";
 import { ConfluenceBreakdownPanel } from "@/components/ConfluenceBreakdownPanel";
 import { SessionHeatmapPanel } from "@/components/SessionHeatmapPanel";
+import { TimeframeAlignmentPanel } from "@/components/TimeframeAlignmentPanel";
+import { ExternalContextCards } from "@/components/ExternalContextCards";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
 import { formatValue, LoadState, MetricCard, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
 import { createSavedAnalysisPayload, getTechnicalDetailGroups, getTechnicalMetricCards, getUnavailableMetricLabels } from "@/lib/technicalAnalysisViewModel";
@@ -126,6 +128,8 @@ export default function TechnicalAnalysis() {
             {metrics.map(metric => <MetricCard key={metric.id} label={metric.label} value={formatValue(metric.value, metric.digits)} detail={metric.detail} icon={metricIcon(metric.id)} />)}
           </div>
           <PriceChart symbol={params.symbol} exchange={params.exchange} onCrossoverChange={handleCrossoverChange} proposedRiskLevels={chartRiskLevels} />
+          <TimeframeAlignmentPanel symbol={params.symbol} exchange={params.exchange} atr={data?.indicators.atr.value ?? null} price={price} />
+          <ExternalContextCards symbol={params.symbol} exchange={params.exchange} />
           <ConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} interval={params.timeframe === "1h" ? "60m" : params.timeframe === "1D" ? "1d" : params.timeframe === "1W" ? "1wk" : params.timeframe} />
           <SessionHeatmapPanel symbol={params.symbol} exchange={params.exchange} />
           {unavailableMetrics.length > 0 ? <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">تعذّر على مزود التحليل تقديم {unavailableMetrics.join("، ")} لهذه القراءة. تبقى بقية بيانات التحليل متاحة، ويمكنك إعادة التحديث أو تجربة إطار آخر.</div> : null}

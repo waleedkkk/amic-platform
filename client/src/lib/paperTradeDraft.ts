@@ -8,6 +8,10 @@ export type PaperTradeDraft = {
   stopLoss: string;
   takeProfit: string;
   note: string;
+  riskSources?: {
+    stopLossSource: RiskLevelSource;
+    takeProfitSource: RiskLevelSource;
+  };
 };
 
 type AnalysisRiskInput = {
@@ -25,6 +29,16 @@ export type TradeRiskAssessment = {
   warnings: string[];
   riskRewardRatio: number | null;
   hasCompletePlan: boolean;
+};
+
+export type TradeDecisionReadiness = {
+  status: "ready" | "incomplete" | "needs_correction";
+  title: string;
+  summary: string;
+  missing: string[];
+  warnings: string[];
+  riskRewardRatio: number | null;
+  sourceNotes: string[];
 };
 
 const PAPER_TRADE_DRAFT_KEY = "amic.paper-trade-draft.v1";
@@ -128,6 +142,26 @@ export function assessTradeRisk(input: Pick<PaperTradeDraft, "side" | "entryPric
   return { warnings, riskRewardRatio: Number.isFinite(riskRewardRatio) && riskRewardRatio! > 0 ? riskRewardRatio : null, hasCompletePlan };
 }
 
+/** يلخص قابلية مراجعة مسودة الصفقة، ولا يصدر توصية ولا يفتح أي صفقة تلقائيًا. */
+export function assessTradeDecisionReadiness(input: Pick<PaperTradeDraft, "symbol" | "exchange" | "side" | "quantity" | "entryPrice" | "stopLoss" | "takeProfit" | "riskSources">): TradeDecisionReadiness {
+  const risk = assessTradeRisk(input);
+  const missing: string[] = [];
+  if (!input.symbol.trim()) missing.push("الرمز");
+  if (!input.exchange.trim()) missing.push("البورصة");
+  if (!input.quantity.trim() || !Number.isFinite(Number(input.quantity)) || Number(input.quantity) <= 0) missing.push("الكمية الموجبة");
+  if (!input.entryPrice.trim() || !Number.isFinite(Number(input.entryPrice)) || Number(input.entryPrice) <= 0) missing.push("سعر الدخول");
+  if (!input.stopLoss.trim()) missing.push("وقف الخسارة");
+  if (!input.takeProfit.trim()) missing.push("جني الربح");
+
+  const sourceNotes = input.riskSources
+    ? [`وقف الخسارة: ${input.riskSources.stopLossSource.label}`, `جني الربح: ${input.riskSources.takeProfitSource.label}`]
+    : ["مصدر وقف الخسارة: لم يُستورد من التحليل أو تم تعديله يدويًا.", "مصدر جني الربح: لم يُستورد من التحليل أو تم تعديله يدويًا."];
+
+  if (risk.warnings.length) return { status: "needs_correction", title: "تحتاج تصحيحًا", summary: "توجد قيم مخاطرة غير منطقية بالنسبة لاتجاه الصفقة أو سعر الدخول.", missing, warnings: risk.warnings, riskRewardRatio: risk.riskRewardRatio, sourceNotes };
+  if (missing.length || !risk.hasCompletePlan) return { status: "incomplete", title: "تنقصها بيانات", summary: "يمكنك حفظ المسودة لاحقًا، لكن أضف عناصر الخطة الناقصة لمراجعة المخاطرة كاملة.", missing, warnings: [], riskRewardRatio: risk.riskRewardRatio, sourceNotes };
+  return { status: "ready", title: "جاهزة للمراجعة", summary: "المسودة مكتملة حسابيًا؛ راجع قيمها بنفسك قبل فتح الصفقة المحاكاة.", missing: [], warnings: [], riskRewardRatio: risk.riskRewardRatio, sourceNotes };
+}
+
 export function makeAnalysisTradeDraft(input: { symbol: string; exchange: string; recommendation: unknown; price: unknown; note: string } & AnalysisRiskInput): PaperTradeDraft | null {
   const side = recommendationToSide(input.recommendation);
   const entryPrice = Number(input.price);
@@ -144,6 +178,7 @@ export function makeAnalysisTradeDraft(input: { symbol: string; exchange: string
     stopLoss: riskLevels.stopLoss,
     takeProfit: riskLevels.takeProfit,
     note: `${input.note} وقف الخسارة وجني الأرباح مقترحان من ${riskLevels.basis}، ويظلان قابلين للتعديل وليسا توصية استثمارية.`,
+    riskSources: { stopLossSource: riskLevels.stopLossSource, takeProfitSource: riskLevels.takeProfitSource },
   };
 }
 

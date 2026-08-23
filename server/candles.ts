@@ -22,12 +22,20 @@ export type CandleHistory = {
   symbol: string;
   yahooSymbol: string;
   provider?: "twelve-data" | "yahoo";
+  sourceRole?: "primary" | "fallback";
   interval: CandleInterval;
   candles: Candle[];
   currency: string;
   exchangeName: string;
   regularMarketPrice: number | null;
   fetchedAt: string;
+};
+
+type MetalCandleFetchers = {
+  apiKey?: string;
+  tryTwelveData?: boolean;
+  fetchTwelveData?: typeof fetchTwelveDataCandleHistory;
+  fetchYahoo?: typeof fetchYahooCandleHistory;
 };
 
 const CHART_TIMEOUT_MS = 25_000;
@@ -72,6 +80,11 @@ export function candleSnapshotTimeframe(interval: CandleInterval): CandleInterva
 }
 
 export function tvSymbolToYahoo(symbol: string, exchange: string): string {
+  const upperSymbol = symbol.trim().toUpperCase();
+  // Yahoo لا يوفر XAUUSD=X وXAGUSD=X كسلاسل شموع، بينما يوفر عقود COMEX
+  // المتصلة GC=F وSI=F التي تمثل الذهب والفضة بأسعار تاريخية قابلة للرسم.
+  if (upperSymbol === "XAUUSD") return "GC=F";
+  if (upperSymbol === "XAGUSD") return "SI=F";
   switch (exchange.toUpperCase()) {
     case "NASDAQ":
     case "NYSE":
@@ -79,7 +92,7 @@ export function tvSymbolToYahoo(symbol: string, exchange: string): string {
     case "OZ":
       return symbol;
     case "FX": {
-      const base = symbol.toUpperCase();
+      const base = upperSymbol;
       return base.endsWith("X") ? base : `${base}=X`;
     }
     case "BINANCE": {
@@ -124,6 +137,19 @@ function normalizeCandleLimit(limit?: number): number {
 export function hasRenderableCandleHistory(candles: Candle[], limit?: number): boolean {
   void limit;
   return candles.length >= MIN_RENDERABLE_CANDLE_COUNT;
+}
+
+/** يمنع تمرير تاريخ ناقص أو شموع غير منطقية من أي مزود احتياطي إلى الرسم. */
+export function hasValidCandleHistory(candles: Candle[], limit?: number): boolean {
+  if (!hasRenderableCandleHistory(candles, limit)) return false;
+  return candles.every((candle, index) => {
+    const prices = [candle.open, candle.high, candle.low, candle.close, candle.volume];
+    const previous = candles[index - 1];
+    return prices.every(Number.isFinite)
+      && candle.low <= Math.min(candle.open, candle.close)
+      && candle.high >= Math.max(candle.open, candle.close)
+      && (!previous || candle.time > previous.time);
+  });
 }
 
 function twelveDataOutputSize(range: string, limit?: number): number {
@@ -236,15 +262,7 @@ export async function fetchTwelveDataCandleHistory(
   };
 }
 
-export async function fetchCandleHistory(symbol: string, exchange: string, interval: CandleInterval, range: string, limit?: number, before?: number): Promise<CandleHistory> {
-  if (process.env.TWELVE_DATA_API_KEY) {
-    try {
-      return await fetchTwelveDataCandleHistory(symbol, exchange, interval, range, undefined, limit, before);
-    } catch (error) {
-      console.warn(`[Candles] Twelve Data unavailable for ${exchange}:${symbol}; using Yahoo fallback`, error instanceof Error ? error.message : String(error));
-    }
-  }
-
+export async function fetchYahooCandleHistory(symbol: string, exchange: string, interval: CandleInterval, range: string, limit?: number, before?: number): Promise<CandleHistory> {
   const yahooSymbol = tvSymbolToYahoo(symbol, exchange);
   const providerInterval = interval === "4h" ? "60m" : interval;
   const url = buildYahooCandleUrl(yahooSymbol, providerInterval, range, before);
@@ -260,6 +278,64 @@ export async function fetchCandleHistory(symbol: string, exchange: string, inter
     currency: result.meta.currency ?? "", exchangeName: result.meta.exchangeName ?? exchange,
     regularMarketPrice: result.meta.regularMarketPrice ?? null, fetchedAt: new Date().toISOString(),
   };
+}
+
+export function isPreciousMetalSymbol(symbol: string) {
+  return ["XAUUSD", "XAGUSD"].includes(symbol.trim().toUpperCase());
+}
+
+/**
+ * سلسلة المعادن معزولة وصريحة: نفضّل Twelve Data، ثم ننتقل إلى عقود Yahoo
+ * عند خطأ المصدر أو عودته بتاريخ غير صالح. لا تختلط هذه السياسة ببيانات الأسهم أو الكريبتو.
+ */
+export async function fetchMetalCandleHistory(
+  symbol: string,
+  exchange: string,
+  interval: CandleInterval,
+  range: string,
+  limit?: number,
+  before?: number,
+  options: MetalCandleFetchers = {},
+): Promise<CandleHistory> {
+  const apiKey = options.apiKey ?? process.env.TWELVE_DATA_API_KEY;
+  const tryTwelveData = options.tryTwelveData ?? Boolean(apiKey);
+  const fetchTwelveData = options.fetchTwelveData ?? fetchTwelveDataCandleHistory;
+  const fetchYahoo = options.fetchYahoo ?? fetchYahooCandleHistory;
+  const errors: string[] = [];
+
+  if (tryTwelveData) {
+    try {
+      const result = await fetchTwelveData(symbol, exchange, interval, range, apiKey, limit, before);
+      if (hasValidCandleHistory(result.candles, limit)) return { ...result, sourceRole: "primary" };
+      errors.push("Twelve Data returned invalid candle history");
+    } catch (error) {
+      errors.push(`Twelve Data: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  try {
+    const result = await fetchYahoo(symbol, exchange, interval, range, limit, before);
+    if (hasValidCandleHistory(result.candles, limit)) return { ...result, sourceRole: "fallback" };
+    errors.push("Yahoo Finance returned invalid candle history");
+  } catch (error) {
+    errors.push(`Yahoo Finance: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  throw new Error(`No valid metal candle history for ${exchange}:${symbol}. ${errors.join(" | ")}`);
+}
+
+export async function fetchCandleHistory(symbol: string, exchange: string, interval: CandleInterval, range: string, limit?: number, before?: number): Promise<CandleHistory> {
+  if (isPreciousMetalSymbol(symbol)) return fetchMetalCandleHistory(symbol, exchange, interval, range, limit, before);
+
+  if (process.env.TWELVE_DATA_API_KEY) {
+    try {
+      return await fetchTwelveDataCandleHistory(symbol, exchange, interval, range, undefined, limit, before);
+    } catch (error) {
+      console.warn(`[Candles] Twelve Data unavailable for ${exchange}:${symbol}; using Yahoo fallback`, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return fetchYahooCandleHistory(symbol, exchange, interval, range, limit, before);
 }
 
 const candleCacheCoalescer = createInFlightRequestCoalescer();

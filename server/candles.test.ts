@@ -5,7 +5,7 @@ vi.mock("./db", () => ({
   saveMarketSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { buildYahooCandleUrl, candleCacheTtlMs, candleSnapshotTimeframe, tvSymbolToYahoo, fetchCandleHistory, getCandleHistoryCached, hasRenderableCandleHistory, resampleFourHourCandles } = await import("./candles");
+const { buildYahooCandleUrl, candleCacheTtlMs, candleSnapshotTimeframe, tvSymbolToYahoo, fetchCandleHistory, fetchMetalCandleHistory, getCandleHistoryCached, hasRenderableCandleHistory, resampleFourHourCandles } = await import("./candles");
 const { getMarketSnapshot, saveMarketSnapshot } = await import("./db");
 
 describe("tvSymbolToYahoo mapping", () => {
@@ -19,6 +19,11 @@ describe("tvSymbolToYahoo mapping", () => {
     expect(tvSymbolToYahoo("EURUSD", "FX")).toBe("EURUSD=X");
     expect(tvSymbolToYahoo("USDCAD", "FX")).toBe("USDCAD=X");
     expect(tvSymbolToYahoo("EURUSD=X", "FX")).toBe("EURUSD=X");
+  });
+
+  it("maps AMIC metal symbols to Yahoo futures with available candle history", () => {
+    expect(tvSymbolToYahoo("XAUUSD", "FX")).toBe("GC=F");
+    expect(tvSymbolToYahoo("XAGUSD", "FX")).toBe("SI=F");
   });
 
   it("maps Binance crypto to Yahoo crypto format", () => {

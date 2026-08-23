@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getCandleHistoryCached, type CandleHistory, type CandleInterval } from "../candles";
-import { getMarketSnapshot, getUserChartPreferences, saveMarketSnapshot, saveUserChartPreferences } from "../db";
+import { addUserWatchlistItem, getMarketSnapshot, getUserAnalysisExternalContextPreferences, getUserChartPreferences, getUserMarketPulsePreferences, listUserWatchlist, removeUserWatchlistItem, saveMarketSnapshot, saveUserAnalysisExternalContextPreferences, saveUserChartPreferences, saveUserMarketPulsePreferences } from "../db";
 import { createInFlightRequestCoalescer } from "../cacheCoalescing";
 import { callTradingViewTool, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
 import { getTwelveDataLiveQuote } from "../twelveDataStream";
@@ -8,6 +8,8 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences } from "../../shared/chartPreferences";
 import { normalizeMultiTimeframeAnalysis, normalizeTechnicalAnalysis } from "../technicalAnalysis";
 import { correlationFromCandles } from "../../shared/correlation";
+import { DEFAULT_MARKET_PULSE_SECTIONS, MARKET_PULSE_SECTION_KEYS, normalizeMarketPulseSections } from "../../shared/marketPulsePreferences";
+import { MAX_EXTERNAL_CONTEXT_REFERENCES, normalizeExternalContextReferences } from "../../shared/analysisExternalContext";
 
 const timeframe = z.enum(["5m", "15m", "1h", "4h", "1D", "1W", "1M"]);
 const candleInterval = z.enum(["1m", "5m", "15m", "30m", "60m", "4h", "1d", "1wk", "1mo"]);
@@ -35,6 +37,12 @@ const chartPreferencesInput = z.object({
   }),
   priceScaleMode: z.enum(["normal", "logarithmic"]),
 });
+const marketPulseSectionsInput = z.object({ sections: z.array(z.enum(MARKET_PULSE_SECTION_KEYS)).min(1).max(MARKET_PULSE_SECTION_KEYS.length) });
+const marketPulseSymbolInput = z.object({
+  symbol: z.string().trim().min(1).max(32).transform(value => value.toUpperCase()),
+  exchange: z.string().trim().min(1).max(32).transform(value => value.toUpperCase()),
+});
+const externalContextReferencesInput = z.object({ references: z.array(marketPulseSymbolInput).max(MAX_EXTERNAL_CONTEXT_REFERENCES) });
 export type SparklineRange = z.infer<typeof sparklineRange>;
 
 function intervalToRange(interval: CandleInterval): string {
@@ -60,6 +68,13 @@ function intervalToRange(interval: CandleInterval): string {
   }
 }
 const toolName = z.enum(TRADINGVIEW_TOOL_NAMES);
+
+function inferWatchlistAssetClass(symbol: string, exchange: string): "crypto" | "stock" | "forex" | "futures" {
+  if (exchange === "BINANCE" || symbol.endsWith("USDT")) return "crypto";
+  if (["NASDAQ", "NYSE", "AMEX", "SSE"].includes(exchange)) return "stock";
+  if (/^(XAU|XAG)/.test(symbol)) return "futures";
+  return "forex";
+}
 
 const PRECIOUS_METALS = [
   { symbol: "XAUUSD", yahooSymbol: "GC=F", label: "الذهب", shortLabel: "XAU", precision: 2 },
@@ -147,6 +162,23 @@ async function fetchCorrelationMatrix() {
     values: histories.map(right => left.asset.id === right.asset.id ? 1 : correlationFromCandles(left.history.candles, right.history.candles).value),
   }));
   return { assets, matrix, fetchedAt: new Date().toISOString() };
+}
+
+async function fetchExternalContextCards(current: { symbol: string; exchange: string }, references: Array<{ symbol: string; exchange: string }>) {
+  const currentHistory = await getCandleHistoryCached(current.symbol, current.exchange, "1d", "6mo", 180);
+  const loaded = await Promise.allSettled(references.map(async reference => ({ reference, history: await getCandleHistoryCached(reference.symbol, reference.exchange, "1d", "6mo", 180) })));
+  const cards = loaded.flatMap(item => {
+    if (item.status !== "fulfilled") return [];
+    const { reference, history } = item.value;
+    const latest = history.candles.at(-1);
+    const previous = history.candles.at(-2);
+    if (!latest) return [];
+    const price = history.regularMarketPrice ?? latest.close;
+    const changePercent = previous?.close ? ((price - previous.close) / previous.close) * 100 : null;
+    const correlation = correlationFromCandles(currentHistory.candles, history.candles);
+    return [{ ...reference, price, changePercent: Number.isFinite(changePercent) ? changePercent : null, correlation: correlation.value, sampleSize: correlation.sampleSize, fetchedAt: history.fetchedAt, provider: history.provider ?? null }];
+  });
+  return { current, cards, fetchedAt: new Date().toISOString() };
 }
 
 const marketCacheCoalescer = createInFlightRequestCoalescer();
@@ -287,5 +319,64 @@ export const marketRouter = router({
     save: protectedProcedure
       .input(chartPreferencesInput)
       .mutation(({ ctx, input }) => saveUserChartPreferences(ctx.user.id, input)),
+  }),
+
+  pulse: router({
+    getPreferences: protectedProcedure.query(async ({ ctx }) => {
+      const [preferences, watchlist] = await Promise.all([getUserMarketPulsePreferences(ctx.user.id), listUserWatchlist(ctx.user.id)]);
+      return {
+        sections: normalizeMarketPulseSections(preferences?.sections ?? DEFAULT_MARKET_PULSE_SECTIONS),
+        watchlist,
+      };
+    }),
+    saveSections: protectedProcedure
+      .input(marketPulseSectionsInput)
+      .mutation(({ ctx, input }) => saveUserMarketPulsePreferences(ctx.user.id, normalizeMarketPulseSections(input.sections))),
+    addSymbol: protectedProcedure
+      .input(marketPulseSymbolInput)
+      .mutation(async ({ ctx, input }) => {
+        const existing = await listUserWatchlist(ctx.user.id);
+        const alreadySaved = existing.some(item => item.symbol === input.symbol && item.exchange === input.exchange);
+        if (!alreadySaved && existing.length >= 8) throw new Error("يمكن حفظ ثمانية رموز كحد أقصى في نبض السوق.");
+        return addUserWatchlistItem(ctx.user.id, { ...input, assetClass: inferWatchlistAssetClass(input.symbol, input.exchange) });
+      }),
+    removeSymbol: protectedProcedure
+      .input(marketPulseSymbolInput)
+      .mutation(({ ctx, input }) => removeUserWatchlistItem(ctx.user.id, input.symbol, input.exchange)),
+    watchlistQuotes: protectedProcedure.query(async ({ ctx }) => {
+      const watchlist = (await listUserWatchlist(ctx.user.id)).slice(0, 8);
+      return Promise.all(watchlist.map(async item => {
+        const analysis = await cached(
+          `pulse:watchlist:${item.exchange}:${item.symbol}:1h`,
+          "pulse-watchlist",
+          item.exchange,
+          "1h",
+          45,
+          async () => normalizeTechnicalAnalysis(await callTradingViewTool("coin_analysis", { symbol: item.symbol, exchange: item.exchange, timeframe: "1h" }), { symbol: item.symbol, exchange: item.exchange, timeframe: "1h" }),
+        );
+        return { symbol: item.symbol, exchange: item.exchange, assetClass: item.assetClass, price: analysis.price.current ?? analysis.price.close ?? null, changePercent: analysis.price.changePercent ?? null, recommendation: analysis.recommendation.signal ?? "neutral" };
+      }));
+    }),
+  }),
+
+  externalContext: router({
+    getPreferences: protectedProcedure.query(async ({ ctx }) => {
+      const preferences = await getUserAnalysisExternalContextPreferences(ctx.user.id);
+      return { references: normalizeExternalContextReferences(preferences?.references ?? []) };
+    }),
+    savePreferences: protectedProcedure
+      .input(externalContextReferencesInput)
+      .mutation(async ({ ctx, input }) => {
+        const references = normalizeExternalContextReferences(input.references);
+        return saveUserAnalysisExternalContextPreferences(ctx.user.id, references);
+      }),
+    cards: protectedProcedure
+      .input(marketPulseSymbolInput)
+      .query(async ({ ctx, input }) => {
+        const preferences = await getUserAnalysisExternalContextPreferences(ctx.user.id);
+        const references = normalizeExternalContextReferences(preferences?.references ?? []).filter(reference => !(reference.symbol === input.symbol && reference.exchange === input.exchange));
+        const refsKey = references.map(reference => `${reference.exchange}:${reference.symbol}`).join(",") || "none";
+        return cached(`analysis:external-context:${input.exchange}:${input.symbol}:${refsKey}`, "external-context", input.exchange, "1d", 90, () => fetchExternalContextCards(input, references));
+      }),
   }),
 });
