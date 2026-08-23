@@ -708,8 +708,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   };
 
   return (
-    <Card className="bg-white/[0.02]">
-      <CardContent className="pt-4 sm:pt-5">
+    <Card className="gap-3 bg-white/[0.02] py-3 sm:gap-4 sm:py-4">
+      <CardContent className="pt-2 sm:pt-3">
         <div ref={chartFullscreenRef} className={isChartFullscreen ? "fixed inset-0 z-[100] flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-[#050910] p-3 sm:p-5" : ""}>
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <p className="text-xs font-semibold tracking-[0.13em] text-primary">PRICE HISTORY</p>
@@ -790,7 +790,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.requireFvg} onChange={event => updateConfluenceSetting("requireFvg", event.target.checked)} /><span>اشتراط FVG</span></label>
           </div>
         ) : null}
-        <div className={`relative overflow-hidden rounded-xl ${isChartFullscreen ? "min-h-0 flex-1" : "h-[300px] min-h-[220px] sm:h-[380px]"}`}>
+        <div className={`relative overflow-hidden rounded-xl ${isChartFullscreen ? "min-h-0 flex-1" : "h-[340px] min-h-[260px] sm:h-[440px] lg:h-[520px]"}`}>
           <div ref={containerRef} className="h-full w-full" />
           {isLoadingOlderHistory ? (
             <div className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-md border border-white/[0.1] bg-black/65 px-2 py-1 text-[11px] text-muted-foreground shadow-lg">

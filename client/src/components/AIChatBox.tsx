@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { getAssistantBubbleAlignment, getChatDirection, getChatTextAlignment } from "@/lib/chatDirection";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Clock3, DatabaseZap, Loader2, Send, User, Sparkles } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -128,11 +130,15 @@ export function AIChatBox({
   emptyStateMessage = "Start a conversation with AI",
   suggestedPrompts,
 }: AIChatBoxProps) {
+  const { language } = useI18n();
   const [input, setInput] = useState("");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const direction = getChatDirection(language);
+  const textAlignment = getChatTextAlignment(language);
+  const assistantBubbleAlignment = getAssistantBubbleAlignment(language);
 
   // Filter out system messages
   const displayMessages = messages.filter((msg) => msg.role !== "system");
@@ -202,12 +208,13 @@ export function AIChatBox({
         "flex flex-col bg-card text-card-foreground rounded-lg border shadow-sm",
         className
       )}
+      dir={direction}
       style={{ height }}
     >
       {/* Messages Area */}
       <div ref={scrollAreaRef} className="flex-1 overflow-hidden">
         {displayMessages.length === 0 ? (
-          <div className="flex h-full flex-col p-4">
+          <div className={cn("flex h-full flex-col p-4", textAlignment)}>
             <div className="flex flex-1 flex-col items-center justify-center gap-6 text-muted-foreground">
               <div className="flex flex-col items-center gap-3">
                 <Sparkles className="size-12 opacity-20" />
@@ -232,7 +239,7 @@ export function AIChatBox({
           </div>
         ) : (
           <ScrollArea className="h-full">
-            <div className="flex flex-col space-y-4 p-4">
+            <div className={cn("flex flex-col space-y-4 p-4", textAlignment)}>
               {displayMessages.map((message, index) => {
                 // Apply min-height to last message only if NOT loading (when loading, the loading indicator gets it)
                 const isLastMessage = index === displayMessages.length - 1;
@@ -246,7 +253,7 @@ export function AIChatBox({
                       "flex gap-3",
                       message.role === "user"
                         ? "justify-end items-start"
-                        : "justify-start items-start"
+                        : `${assistantBubbleAlignment} items-start`
                     )}
                     style={
                       shouldApplyMinHeight
@@ -263,6 +270,7 @@ export function AIChatBox({
                     <div
                       className={cn(
                         "max-w-[80%] rounded-lg px-4 py-2.5",
+                        textAlignment,
                         message.role === "user"
                           ? "bg-primary text-primary-foreground"
                           : "bg-muted text-foreground"
@@ -270,7 +278,7 @@ export function AIChatBox({
                     >
                       {message.role === "assistant" ? (
                         <div className="space-y-3">
-                          <div className="prose prose-sm dark:prose-invert max-w-none">
+                          <div className={cn("prose prose-sm dark:prose-invert max-w-none", textAlignment)}>
                             <Streamdown>{message.content}</Streamdown>
                           </div>
                           {message.toolActivity && message.toolActivity.length > 0 && (
@@ -281,7 +289,7 @@ export function AIChatBox({
                                   <span className="font-medium text-foreground">{activity.toolLabel}</span>
                                   <span>· {activity.source}</span>
                                   <Clock3 className="mr-0.5 size-3" aria-hidden="true" />
-                                  <time dateTime={activity.fetchedAt}>{new Date(activity.fetchedAt).toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
+                                  <time dateTime={activity.fetchedAt}>{new Date(activity.fetchedAt).toLocaleTimeString(language === "ar" ? "ar" : "en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
                                 </div>
                               ))}
                             </div>
@@ -305,7 +313,7 @@ export function AIChatBox({
 
               {isLoading && (
                 <div
-                  className="flex items-start gap-3"
+                  className={cn("flex items-start gap-3", assistantBubbleAlignment)}
                   style={
                     minHeightForLastMessage > 0
                       ? { minHeight: `${minHeightForLastMessage}px` }
@@ -330,6 +338,7 @@ export function AIChatBox({
         ref={inputAreaRef}
         onSubmit={handleSubmit}
         className="flex gap-2 p-4 border-t bg-background/50 items-end"
+        dir={direction}
       >
         <Textarea
           ref={textareaRef}
@@ -337,7 +346,8 @@ export function AIChatBox({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="flex-1 max-h-32 resize-none min-h-9"
+          dir={direction}
+          className={cn("flex-1 max-h-32 resize-none min-h-9", textAlignment)}
           rows={1}
         />
         <Button

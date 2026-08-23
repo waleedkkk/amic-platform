@@ -4,6 +4,7 @@ import {
   saveMarketSnapshotCleanupMonitorTaskUid,
 } from "../db";
 import { createHeartbeatJob } from "../_core/heartbeat";
+import { getSessionTokenFromRequest } from "../localAuth";
 import { adminProcedure, router } from "../_core/trpc";
 
 const cleanupScheduleInput = z.object({
@@ -13,7 +14,7 @@ const cleanupScheduleInput = z.object({
 export const adminHeartbeatRouter = router({
   registerMarketSnapshotCleanup: adminProcedure
     .input(cleanupScheduleInput.nullish())
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const existingTaskUid = await getMarketSnapshotCleanupMonitorTaskUid();
       if (existingTaskUid) return { taskUid: existingTaskUid, created: false } as const;
 
@@ -24,7 +25,7 @@ export const adminHeartbeatRouter = router({
           path: "/api/scheduled/market-snapshot-cleanup",
           description: "Delete AMIC market snapshots expired for more than 24 hours",
         },
-        "",
+        getSessionTokenFromRequest(ctx.req) ?? "",
       );
       await saveMarketSnapshotCleanupMonitorTaskUid(job.taskUid);
       return { taskUid: job.taskUid, nextExecutionAt: job.nextExecutionAt ?? null, created: true } as const;

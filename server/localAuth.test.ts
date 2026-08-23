@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mintSessionToken, verifySessionToken, validatePassword } from "./localAuth";
+import { getSessionTokenFromRequest, mintSessionToken, verifySessionToken, validatePassword } from "./localAuth";
 
 const originalJwtSecret = process.env.JWT_SECRET;
 
@@ -48,5 +48,19 @@ describe("validatePassword", () => {
     expect(validatePassword("123")).toBe("كلمة المرور يجب أن تكون 8 أحرف على الأقل");
     expect(validatePassword("short")).toBe("كلمة المرور يجب أن تكون 8 أحرف على الأقل");
     expect(validatePassword("Abcdef1234")).toBeNull();
+  });
+});
+
+describe("getSessionTokenFromRequest", () => {
+  it("يستخرج قيمة جلسة محلية موقعة من كوكي الطلب دون تفسيرها", () => {
+    const token = "signed-session-token";
+    const req = { headers: { cookie: `theme=dark; app_session_id=${token}` } };
+    expect(getSessionTokenFromRequest(req as never)).toBe(token);
+  });
+
+  it("يدعم كوكي الجلسة المغلف في JSON ولا يعيد قيمة عند غيابه", () => {
+    const wrapped = encodeURIComponent(JSON.stringify({ token: "wrapped-token" }));
+    expect(getSessionTokenFromRequest({ headers: { cookie: `app_session_id=${wrapped}` } } as never)).toBe("wrapped-token");
+    expect(getSessionTokenFromRequest({ headers: {} } as never)).toBeNull();
   });
 });

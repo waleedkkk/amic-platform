@@ -41,7 +41,8 @@ export function validatePassword(password: string): string | null {
   return null;
 }
 
-function readAuthCookieValue(req: Request): string | null {
+/** يستخرج التوكن الموقّع من كوكي جلسة الطلب من دون تسجيله أو كشفه. */
+export function getSessionTokenFromRequest(req: Request): string | null {
   const raw = parseCookieHeader(req.headers.cookie ?? "")[COOKIE_NAME] ?? null;
   if (!raw) return null;
   // The token may arrive wrapped in JSON if the legacy SDK wrote it; accept a
@@ -176,7 +177,7 @@ export function clearSessionCookie(
 
 /** Look up the user matching the session token (if any). */
 export async function resolveSessionUser(req: Request): Promise<User | null> {
-  const token = readAuthCookieValue(req);
+  const token = getSessionTokenFromRequest(req);
   if (!token) return null;
   const parsed = verifySessionToken(token);
   if (!parsed) return null;

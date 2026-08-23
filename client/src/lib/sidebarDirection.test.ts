@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { ARABIC_SIDEBAR_SIDE, getSidebarResizeWidth } from "./sidebarDirection";
+import { ARABIC_SIDEBAR_SIDE, getSidebarResizeWidth, getSidebarSideForLanguage } from "./sidebarDirection";
 
 describe("اتجاه الشريط الجانبي العربي", () => {
   it("يضع الواجهة العربية في الجهة اليمنى", () => {
     expect(ARABIC_SIDEBAR_SIDE).toBe("right");
+  });
+
+  it("ينقل الواجهة الإنجليزية إلى الجهة اليسرى", () => {
+    expect(getSidebarSideForLanguage("ar")).toBe("right");
+    expect(getSidebarSideForLanguage("en")).toBe("left");
   });
 
   it("يحسب عرض شريط الجهة اليمنى من حافته اليمنى", () => {
