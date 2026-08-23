@@ -13,6 +13,8 @@ import { getChartFullscreenPortalContainer, isChartFullscreenTarget, requestChar
 import { countEnabledIctLayers, ICT_LAYER_CONTROLS } from "@/lib/chartMobileControls";
 import { getFitContentKey } from "@/lib/chartViewport";
 import { CHART_INTERVALS, chartIntervalStorageKey, isStoredChartInterval } from "@/lib/chartIntervalPreference";
+import { isIctChartLayerVisible, isLegacyChartLayerVisible } from "@/lib/chartLayerComposition";
+import { shouldMergeLiveQuoteIntoLastCandle } from "@/lib/chartQuoteIntegrity";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import { StructureInsightPanel } from "@/components/StructureInsightPanel";
 import { describeCandleDataStatus, getMarketAssetProfile } from "@shared/marketAssetProfile";
@@ -130,7 +132,18 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const [interval, setInterval] = useState<ChartInterval>("1d");
   const [preferences, setPreferences] = useState<ChartPreferences>(DEFAULT_CHART_PREFERENCES);
   const [showConfluenceSettings, setShowConfluenceSettings] = useState(false);
-  const visible = preferences.layers;
+  const showLegacySma = isLegacyChartLayerVisible(preferences, "sma");
+  const showLegacyEma = isLegacyChartLayerVisible(preferences, "ema");
+  const showLegacyLevels = isLegacyChartLayerVisible(preferences, "levels");
+  const showLegacyZones = isLegacyChartLayerVisible(preferences, "zones");
+  const showLegacyEvents = isLegacyChartLayerVisible(preferences, "events");
+  const showLegacyVolume = isLegacyChartLayerVisible(preferences, "volume");
+  const showIctTrend = isIctChartLayerVisible(preferences, "trend");
+  const showIctStructure = isIctChartLayerVisible(preferences, "structure");
+  const showIctLiquidity = isIctChartLayerVisible(preferences, "liquidity");
+  const showIctZones = isIctChartLayerVisible(preferences, "zones");
+  const showIctSignals = isIctChartLayerVisible(preferences, "signals");
+  const showIctSummary = isIctChartLayerVisible(preferences, "summary");
   const chartPreferencesQuery = trpc.market.chartPreferences.get.useQuery(undefined, { staleTime: 60 * 60 * 1000, enabled: isAuthenticated });
   const saveChartPreferences = trpc.market.chartPreferences.save.useMutation();
   const structureAlertsQuery = trpc.structureAlerts.list.useQuery(undefined, { enabled: isAuthenticated });
@@ -290,6 +303,17 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       setLiveStatus(quote?.status ?? "unavailable");
       return;
     }
+    const canMergeQuote = shouldMergeLiveQuoteIntoLastCandle({
+      symbol,
+      sourceRole: candlesQuery.data?.sourceRole,
+      latestCandleClose: last.close,
+      liveQuotePrice: quote.price,
+    });
+    if (!canMergeQuote) {
+      setLiveCandle(null);
+      setLiveStatus("delayed");
+      return;
+    }
     setLiveStatus(quote.status);
     setLiveCandle({
       time: last.time,
@@ -299,7 +323,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       close: quote.price,
       volume: last.volume,
     });
-  }, [candlesQuery.data?.candles, exchange, twelveLiveQuote.data]);
+  }, [candlesQuery.data?.candles, candlesQuery.data?.sourceRole, exchange, symbol, twelveLiveQuote.data]);
 
   useEffect(() => {
     chartCandlesRef.current = chartCandles;
@@ -473,13 +497,13 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     };
 
     const sma20Vals = calculateSma(closes, 20);
-    apply(overlays.sma20, visible.sma, closes.map((v, i) => sma20Vals[i]).map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
+    apply(overlays.sma20, showLegacySma, closes.map((v, i) => sma20Vals[i]).map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
     const sma50Vals = calculateSma(closes, 50);
-    apply(overlays.sma50, visible.sma, sma50Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
+    apply(overlays.sma50, showLegacySma, sma50Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
     const ema12Vals = ema(closes, 12);
-    apply(overlays.ema12, visible.ema, ema12Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
+    apply(overlays.ema12, showLegacyEma, ema12Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
     const ema26Vals = ema(closes, 26);
-    apply(overlays.ema26, visible.ema, ema26Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
+    apply(overlays.ema26, showLegacyEma, ema26Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
 
     const lookback = Math.min(55, data.length);
     const fallbackLevels = findLevels(data, lookback);
@@ -499,8 +523,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     const latestSupport = structure.levels.filter(level => level.kind === "support").sort((a, b) => b.createdAt - a.createdAt)[0];
     const latestResistance = structure.levels.filter(level => level.kind === "resistance").sort((a, b) => b.createdAt - a.createdAt)[0];
     const overlayDensity = getChartOverlayDensity(chartWidth);
-    apply(overlays.support, visible.levels, data.map(c => ({ time: c.time as Time, value: latestSupport?.price ?? fallbackLevels.support })));
-    apply(overlays.resistance, visible.levels, data.map(c => ({ time: c.time as Time, value: latestResistance?.price ?? fallbackLevels.resistance })));
+    apply(overlays.support, showLegacyLevels, data.map(c => ({ time: c.time as Time, value: latestSupport?.price ?? fallbackLevels.support })));
+    apply(overlays.resistance, showLegacyLevels, data.map(c => ({ time: c.time as Time, value: latestResistance?.price ?? fallbackLevels.resistance })));
 
     const clearLines = (lines: IPriceLine[]) => lines.forEach(line => candlesSeries.removePriceLine(line));
     clearLines(decorationsRef.current.levelLines);
@@ -509,7 +533,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     decorationsRef.current.indicatorLines.forEach(series => chart.removeSeries(series));
     decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [], indicatorLines: [] };
 
-    if (!confluence.enabled && visible.levels) {
+    if (showLegacyLevels) {
       decorationsRef.current.levelLines = structure.levels.slice(-overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
         price: level.price,
         color: level.kind === "support" ? "rgba(22,163,74,0.46)" : "rgba(220,38,38,0.46)",
@@ -537,7 +561,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       ]);
     }
 
-    if (!confluence.enabled && visible.zones) {
+    if (showLegacyZones) {
       decorationsRef.current.zoneLines = structure.zones.slice(-overlayDensity.zoneLimit).flatMap(zone => [
         candlesSeries.createPriceLine({
           price: zone.high,
@@ -557,7 +581,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       ]);
     }
 
-    const markers: SeriesMarker<Time>[] = !confluence.enabled && visible.events
+    const markers: SeriesMarker<Time>[] = showLegacyEvents
       ? structure.events.map(event => ({
         time: event.time as Time,
         position: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? "belowBar" : "aboveBar",
@@ -568,7 +592,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       : [];
 
     if (confluence.enabled) {
-      if (confluence.trend) {
+      if (showIctTrend) {
         decorationsRef.current.indicatorLines = confluenceResult.lines.map(line => {
           const series = chart.addSeries(LineSeries, { color: line.color, lineWidth: line.id === "ema-slow" ? 2 : 1, priceLineVisible: false, lastValueVisible: false });
           series.setData(line.points.map(point => ({ time: point.time as Time, value: point.value })));
@@ -576,38 +600,38 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         });
       }
 
-      if (confluence.liquidity) {
-        decorationsRef.current.levelLines = confluenceResult.levels.slice(-overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
+      if (showIctLiquidity) {
+        decorationsRef.current.levelLines.push(...confluenceResult.levels.slice(-overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
           price: level.price,
           color: level.kind === "sell-side-liquidity" ? "rgba(34,211,238,0.62)" : "rgba(232,121,249,0.62)",
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           axisLabelVisible: true,
           title: overlayDensity.compact ? level.label : `${level.label} · سيولة`,
-        }));
+        })));
       }
 
-      if (confluence.zones) {
-        decorationsRef.current.zoneLines = confluenceResult.zones.slice(-overlayDensity.zoneLimit).flatMap(zone => {
+      if (showIctZones) {
+        decorationsRef.current.zoneLines.push(...confluenceResult.zones.slice(-overlayDensity.zoneLimit).flatMap(zone => {
           const bullish = zone.direction === "bullish";
           const color = zone.kind.endsWith("fvg") ? (bullish ? "rgba(59,130,246,0.56)" : "rgba(168,85,247,0.56)") : (bullish ? "rgba(20,184,166,0.62)" : "rgba(239,68,68,0.62)");
           return [
             candlesSeries.createPriceLine({ price: zone.high, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: overlayDensity.showZoneAxisLabels, title: zone.label }),
             candlesSeries.createPriceLine({ price: zone.low, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false }),
           ];
-        });
+        }));
       }
 
-      if (confluence.structure || confluence.signals || confluence.liquidity) {
+      if (showIctStructure || showIctSignals || showIctLiquidity) {
         const maxEvents = overlayDensity.compact ? 8 : 20;
-        const eventMarkers: SeriesMarker<Time>[] = confluenceResult.events.slice(-maxEvents).filter(event => (event.kind.includes("sweep") ? confluence.liquidity : confluence.structure)).map(event => ({
+        const eventMarkers: SeriesMarker<Time>[] = confluenceResult.events.slice(-maxEvents).filter(event => (event.kind.includes("sweep") ? showIctLiquidity : showIctStructure)).map(event => ({
           time: event.time as Time,
           position: event.direction === "bullish" ? "belowBar" : "aboveBar",
           color: event.direction === "bullish" ? "#22d3ee" : "#f472b6",
           shape: event.direction === "bullish" ? "arrowUp" : "arrowDown",
           text: event.label,
         }));
-        const signalMarkers: SeriesMarker<Time>[] = confluence.signals ? confluenceResult.signals.slice(-maxEvents).map(signal => ({
+        const signalMarkers: SeriesMarker<Time>[] = showIctSignals ? confluenceResult.signals.slice(-maxEvents).map(signal => ({
           time: signal.time as Time,
           position: signal.direction === "bullish" ? "belowBar" : "aboveBar",
           color: signal.direction === "bullish" ? "#22c55e" : "#ef4444",
@@ -635,7 +659,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
 
     const hasVol = volumes.some(v => v > 0);
     setHasVolume(hasVol);
-    if (visible.volume && hasVol) {
+    if (showLegacyVolume && hasVol) {
       overlays.volume.setData(
         data.map((c, i) => ({ time: c.time as Time, value: c.volume ?? 0, color: c.close >= c.open ? "rgba(22,163,74,0.45)" : "rgba(220,38,38,0.45)" })),
       );
@@ -646,7 +670,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       overlays.volume.applyOptions({ visible: false });
     }
 
-  }, [stableKey, chartCandles, chartWidth, confluenceResult, exchange, preferences.confluenceIct, proposedRiskLevels, savedSignalsQuery.data, symbol, visible]);
+  }, [stableKey, chartCandles, chartWidth, confluenceResult, exchange, preferences.confluenceIct, proposedRiskLevels, savedSignalsQuery.data, showIctLiquidity, showIctSignals, showIctStructure, showIctTrend, showIctZones, showLegacyEma, showLegacyEvents, showLegacyLevels, showLegacySma, showLegacyVolume, showLegacyZones, symbol]);
 
   // لا نعيد ضبط زوم/تمرير المستخدم مع بث سعر حي أو تبديل طبقات المؤشر.
   // يطبّق fitContent فقط بعد وصول بيانات الرمز أو البورصة أو الإطار الجديد.
@@ -835,7 +859,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
           )}
         </div>
         </div>
-        {preferences.confluenceIct.enabled && preferences.confluenceIct.summary ? (
+        {showIctSummary ? (
           <div className="mt-3 grid gap-2 rounded-xl border border-primary/20 bg-primary/[0.05] p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
             <div><p className="text-muted-foreground">اتجاه ICT</p><p className={`mt-1 font-semibold ${confluenceResult.summary.trend === "bullish" ? "text-emerald-300" : confluenceResult.summary.trend === "bearish" ? "text-rose-300" : "text-muted-foreground"}`}>{confluenceResult.summary.trend === "bullish" ? "صاعد" : confluenceResult.summary.trend === "bearish" ? "هابط" : "محايد"}</p></div>
             <div><p className="text-muted-foreground">Confluence</p><p className="mt-1 font-mono">شراء {confluenceResult.summary.confluence.bull}/{confluenceResult.summary.confluence.max} · بيع {confluenceResult.summary.confluence.bear}/{confluenceResult.summary.confluence.max}</p></div>
@@ -860,8 +884,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
               <span className="font-mono text-muted-foreground">
                 الشموع: {candlesQuery.data.provider === "twelve-data" ? "Twelve Data مرخّص" : "Yahoo Finance احتياطي"}
               </span>
-              {preferences.confluenceIct.enabled ? <><span className="font-mono text-amber-300">━ EMA ICT</span><span className="font-mono text-cyan-300">┅ BSL / SSL</span><span className="font-mono text-violet-300">┈ OB / FVG</span><span className="font-mono text-emerald-300">↑↓ BOS / CHoCH / Sweep</span></> : null}
-              {visible.volume && hasVolume && <span className="font-mono text-sky-300/80">▪ الحجم</span>}
+              {preferences.confluenceIct.enabled ? <>{showIctTrend ? <span className="font-mono text-amber-300">━ EMA ICT</span> : null}{showIctLiquidity ? <span className="font-mono text-cyan-300">┅ BSL / SSL</span> : null}{showIctZones ? <span className="font-mono text-violet-300">┈ OB / FVG</span> : null}{showIctStructure || showIctSignals ? <span className="font-mono text-emerald-300">↑↓ BOS / CHoCH / Sweep</span> : null}</> : null}
+              {showLegacyVolume && hasVolume && <span className="font-mono text-sky-300/80">▪ الحجم</span>}
               {candlesQuery.data.regularMarketPrice != null ? (
                 <span className="font-mono text-sky-300">
                   السعر الحالي: {candlesQuery.data.regularMarketPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}
@@ -871,9 +895,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             </>
           ) : null}
         </div>
-        {!preferences.confluenceIct.enabled && (visible.events || visible.zones) && (structureDetail.events.length > 0 || structureDetail.zones.length > 0) ? (
+        {(showLegacyEvents || showLegacyZones) && (structureDetail.events.length > 0 || structureDetail.zones.length > 0) ? (
           <div className="mt-3 grid gap-2 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs sm:grid-cols-2">
-            {visible.events && structureDetail.events.length > 0 ? (
+            {showLegacyEvents && structureDetail.events.length > 0 ? (
               <div className="min-w-0">
                 <p className="mb-2 font-semibold text-foreground">أحداث بنية السعر</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -889,7 +913,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                 })()}
               </div>
             ) : null}
-            {visible.zones && structureDetail.zones.length > 0 ? (
+            {showLegacyZones && structureDetail.zones.length > 0 ? (
               <div className="min-w-0">
                 <p className="mb-2 font-semibold text-foreground">مناطق قابلة للمراجعة</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -899,8 +923,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             ) : null}
           </div>
         ) : null}
-        {!preferences.confluenceIct.enabled && (visible.levels || visible.zones) ? <StructureInsightPanel symbol={symbol} exchange={exchange} interval={structureAlertInterval ?? "1h"} currentPrice={chartCandles.at(-1)?.close ?? candlesQuery.data?.regularMarketPrice ?? null} levels={structureDetail.levels} zones={structureDetail.zones} proposedRiskLevels={proposedRiskLevels} /> : null}
-        {!preferences.confluenceIct.enabled ? <div className="mt-3 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs">
+        {(showLegacyLevels || showLegacyZones) ? <StructureInsightPanel symbol={symbol} exchange={exchange} interval={structureAlertInterval ?? "1h"} currentPrice={chartCandles.at(-1)?.close ?? candlesQuery.data?.regularMarketPrice ?? null} levels={structureDetail.levels} zones={structureDetail.zones} proposedRiskLevels={proposedRiskLevels} /> : null}
+        {showLegacyEvents ? <div className="mt-3 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-semibold text-foreground">تنبيهات بنية السعر</p>
