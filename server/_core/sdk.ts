@@ -24,6 +24,23 @@ export type SessionPayload = {
   name: string;
 };
 
+export type CronAuthDiagnostics = {
+  stage: "identity_lookup";
+  sessionAppIdMatchesEnvironment: boolean;
+  taskUidEmbeddedInSignedIdentity: boolean;
+  taskUidLength: number | null;
+};
+
+export class CronAuthenticationError extends Error {
+  constructor(
+    message: string,
+    public readonly diagnostics: CronAuthDiagnostics,
+  ) {
+    super(message);
+    this.name = "CronAuthenticationError";
+  }
+}
+
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
 const GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
 const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
@@ -292,7 +309,14 @@ export class SDKServer {
         // بيئات النشر الخارجية ترفض الاستعلام اللاحق إلى OAuth رغم أن هوية
         // Heartbeat تحمل taskUid بصورة cron_<taskUid> موقّعة من المنصة.
         const taskUid = getTaskUidFromCronOpenId(session.openId);
-        if (!taskUid) throw error;
+        if (!taskUid) {
+          const diagnostics = createCronAuthDiagnostics(session);
+          console.warn("[Auth] Cron identity lookup rejected", diagnostics);
+          throw new CronAuthenticationError(
+            error instanceof Error ? error.message : String(error),
+            diagnostics,
+          );
+        }
         console.warn("[Auth] OAuth cron lookup was unavailable; using signed cron task identity");
         return buildCronUser({
           openId: session.openId,
@@ -344,6 +368,17 @@ export function getTaskUidFromCronOpenId(openId: string): string | null {
   if (!openId.startsWith(CRON_OPEN_ID_PREFIX)) return null;
   const candidate = openId.slice(CRON_OPEN_ID_PREFIX.length);
   return /^[A-Za-z0-9]{16,65}$/.test(candidate) ? candidate : null;
+}
+
+/** دليل مقيّد لسجل Heartbeat؛ لا يحتوي على الكوكي أو openId أو appId الخام. */
+export function createCronAuthDiagnostics(session: SessionPayload): CronAuthDiagnostics {
+  const embeddedTaskUid = getTaskUidFromCronOpenId(session.openId);
+  return {
+    stage: "identity_lookup",
+    sessionAppIdMatchesEnvironment: session.appId === ENV.appId,
+    taskUidEmbeddedInSignedIdentity: Boolean(embeddedTaskUid),
+    taskUidLength: embeddedTaskUid?.length ?? null,
+  };
 }
 
 /** Result of `sdk.authenticateRequest`. Cron callbacks set `isCron=true` and `taskUid`; see `/home/ubuntu/skills/webdev-periodic-updates/SKILL.md`. */

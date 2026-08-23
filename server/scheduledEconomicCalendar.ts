@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { getEconomicCalendarMonitorTaskUid } from "./db";
 import { checkEconomicCalendarPreAlerts } from "./economicCalendarMonitor";
-import { sdk } from "./_core/sdk";
+import { CronAuthenticationError, sdk } from "./_core/sdk";
 
 export async function handleEconomicCalendarSchedule(req: Request, res: Response) {
   try {
@@ -13,6 +13,11 @@ export async function handleEconomicCalendarSchedule(req: Request, res: Response
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[Economic calendar] scheduled check failed", message);
-    return res.status(500).json({ error: message, context: { path: req.path }, timestamp: new Date().toISOString() });
+    return res.status(500).json({
+      error: message,
+      context: { path: req.path },
+      cronDiagnostics: error instanceof CronAuthenticationError ? error.diagnostics : undefined,
+      timestamp: new Date().toISOString(),
+    });
   }
 }

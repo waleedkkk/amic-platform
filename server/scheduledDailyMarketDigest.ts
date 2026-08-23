@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { getDailyMarketDigestMonitorTaskUid } from "./db";
 import { sendDailyMarketDigests } from "./dailyMarketDigest";
-import { sdk } from "./_core/sdk";
+import { CronAuthenticationError, sdk } from "./_core/sdk";
 
 export async function handleDailyMarketDigestSchedule(req: Request, res: Response) {
   try {
@@ -12,6 +12,11 @@ export async function handleDailyMarketDigestSchedule(req: Request, res: Respons
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[Daily market digest] scheduled run failed", message);
-    return res.status(500).json({ error: message, context: { path: req.path }, timestamp: new Date().toISOString() });
+    return res.status(500).json({
+      error: message,
+      context: { path: req.path },
+      cronDiagnostics: error instanceof CronAuthenticationError ? error.diagnostics : undefined,
+      timestamp: new Date().toISOString(),
+    });
   }
 }

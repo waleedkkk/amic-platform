@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { cleanupExpiredMarketSnapshots } from "./db";
-import { sdk } from "./_core/sdk";
+import { CronAuthenticationError, sdk } from "./_core/sdk";
 
 /** معالج Heartbeat: لا يستخدم setInterval لأن بيئات الإنتاج قد تتوقف بين الطلبات. */
 export async function handleMarketSnapshotCleanupSchedule(req: Request, res: Response) {
@@ -13,6 +13,11 @@ export async function handleMarketSnapshotCleanupSchedule(req: Request, res: Res
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[Market snapshots] scheduled cleanup failed", message);
-    return res.status(500).json({ error: message, context: { path: req.path }, timestamp: new Date().toISOString() });
+    return res.status(500).json({
+      error: message,
+      context: { path: req.path },
+      cronDiagnostics: error instanceof CronAuthenticationError ? error.diagnostics : undefined,
+      timestamp: new Date().toISOString(),
+    });
   }
 }

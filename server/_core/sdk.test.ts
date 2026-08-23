@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AxiosInstance } from "axios";
-import { getTaskUidFromCronOpenId, SDKServer } from "./sdk";
+import { createCronAuthDiagnostics, getTaskUidFromCronOpenId, SDKServer } from "./sdk";
 
 describe("SDKServer cron identity lookup", () => {
   it("uses the verified session appId when resolving a cron identity", async () => {
@@ -23,5 +23,23 @@ describe("getTaskUidFromCronOpenId", () => {
     expect(getTaskUidFromCronOpenId("cron_j7SXze4Z2TzvdbAsqtFyjH")).toBe("j7SXze4Z2TzvdbAsqtFyjH");
     expect(getTaskUidFromCronOpenId("cron_short")).toBeNull();
     expect(getTaskUidFromCronOpenId("user_j7SXze4Z2TzvdbAsqtFyjH")).toBeNull();
+  });
+});
+
+describe("createCronAuthDiagnostics", () => {
+  it("لا يعيد المعرفات الخام أو الكوكي ضمن الدليل التشخيصي", () => {
+    const diagnostics = createCronAuthDiagnostics({
+      openId: "cron_j7SXze4Z2TzvdbAsqtFyjH",
+      appId: "app-id",
+      name: "Heartbeat",
+    });
+
+    expect(diagnostics).toEqual({
+      stage: "identity_lookup",
+      sessionAppIdMatchesEnvironment: false,
+      taskUidEmbeddedInSignedIdentity: true,
+      taskUidLength: 22,
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain("j7SXze4Z2TzvdbAsqtFyjH");
   });
 });
