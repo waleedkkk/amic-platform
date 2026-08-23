@@ -71,6 +71,11 @@ export function SymbolSelectContent({ onSelect }: SymbolSelectContentProps) {
   );
 }
 
+/** لا ينبغي أن يطلب المتصفح رمزًا يدويًا عندما تكون قيمة قائمة الرموز صالحة بالفعل. */
+export function isManualSymbolRequired(value: string, required = false) {
+  return Boolean(required && !SUGGESTED_SYMBOLS.some(entry => entry.symbol === value));
+}
+
 type SymbolSelectProps = {
   label: string;
   value: string;
@@ -87,6 +92,7 @@ type SymbolSelectProps = {
 export function SymbolSelect({ label, value, onChange, className, onSelect, customPlaceholder, customLabel, required }: SymbolSelectProps) {
   const suggested = SUGGESTED_SYMBOLS.find(entry => entry.symbol === value);
   const isSuggested = Boolean(suggested);
+  const manualInputIsRequired = isManualSymbolRequired(value, required);
   const suggestedExchange = suggested?.exchange ?? "";
   return (
     <div className={className}>
@@ -100,7 +106,7 @@ export function SymbolSelect({ label, value, onChange, className, onSelect, cust
         </Select>
         <Input
           aria-label={`${customLabel ?? label} يدويًا`}
-          required={required}
+          required={manualInputIsRequired}
           placeholder={isSuggested ? (customPlaceholder ?? "رمز آخر…") : value || "رمز…"}
           className={cn("w-full shrink-0 bg-black/15 font-mono text-sm min-[420px]:w-28 min-[420px]:text-xs", isSuggested && "border-dashed")}
           value={isSuggested ? "" : value}
