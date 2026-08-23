@@ -12,7 +12,7 @@ const cleanupScheduleInput = z.object({
 
 export const adminHeartbeatRouter = router({
   registerMarketSnapshotCleanup: adminProcedure
-    .input(cleanupScheduleInput.optional())
+    .input(cleanupScheduleInput.nullish())
     .mutation(async ({ input }) => {
       const existingTaskUid = await getMarketSnapshotCleanupMonitorTaskUid();
       if (existingTaskUid) return { taskUid: existingTaskUid, created: false } as const;
