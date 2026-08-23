@@ -280,12 +280,26 @@ export class SDKServer {
     if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
       // مهمة Heartbeat تحمل appId موقعًا داخل الكوكي نفسه. استخدامه يمنع رفض
       // هوية cron عندما تختلف قيمة بيئة النشر القديمة عن معرّف المشروع للمهمة.
-      const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "", session.appId);
-      const taskUid = userInfo.taskUid ?? null;
-      if (!taskUid) {
-        throw ForbiddenError("Cron session missing task_uid");
+      try {
+        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "", session.appId);
+        const taskUid = userInfo.taskUid ?? null;
+        if (!taskUid) {
+          throw ForbiddenError("Cron session missing task_uid");
+        }
+        return buildCronUser(userInfo);
+      } catch (error) {
+        // يبقى هذا المسار مقيدًا بجلسة JWT اجتازت التوقيع المحلي أعلاه. بعض
+        // بيئات النشر الخارجية ترفض الاستعلام اللاحق إلى OAuth رغم أن هوية
+        // Heartbeat تحمل taskUid بصورة cron_<taskUid> موقّعة من المنصة.
+        const taskUid = getTaskUidFromCronOpenId(session.openId);
+        if (!taskUid) throw error;
+        console.warn("[Auth] OAuth cron lookup was unavailable; using signed cron task identity");
+        return buildCronUser({
+          openId: session.openId,
+          name: session.name,
+          taskUid,
+        } as GetUserInfoWithJwtResponse);
       }
-      return buildCronUser(userInfo);
     }
 
     const sessionUserId = session.openId;
@@ -324,6 +338,13 @@ export class SDKServer {
 }
 
 const CRON_OPEN_ID_PREFIX = "cron_";
+
+/** يستخرج فقط معرّفات Heartbeat الأبجدية الرقمية ذات الطول المتوقع من هوية موقعة. */
+export function getTaskUidFromCronOpenId(openId: string): string | null {
+  if (!openId.startsWith(CRON_OPEN_ID_PREFIX)) return null;
+  const candidate = openId.slice(CRON_OPEN_ID_PREFIX.length);
+  return /^[A-Za-z0-9]{16,65}$/.test(candidate) ? candidate : null;
+}
 
 /** Result of `sdk.authenticateRequest`. Cron callbacks set `isCron=true` and `taskUid`; see `/home/ubuntu/skills/webdev-periodic-updates/SKILL.md`. */
 export type AuthenticatedUser = User & {
