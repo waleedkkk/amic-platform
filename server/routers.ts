@@ -14,6 +14,7 @@ import {
 import { getDb } from "./db";
 import { aiRouter } from "./routers/ai";
 import { adminAiRouter } from "./routers/adminAi";
+import { adminHeartbeatRouter } from "./routers/adminHeartbeat";
 import { backtestRouter } from "./routers/backtest";
 import { leaderboardRouter } from "./routers/leaderboard";
 import { economicCalendarRouter } from "./routers/economicCalendar";
@@ -71,8 +72,9 @@ export const appRouter = router({
             .select({ id: users.id, name: users.name, email: users.email, role: users.role, loginMethod: users.loginMethod, lastSignedIn: users.lastSignedIn })
             .from(users);
           return rows;
-        }),
+      }),
       ai: adminAiRouter,
+      heartbeat: adminHeartbeatRouter,
     }),
   }),
   market: marketRouter,

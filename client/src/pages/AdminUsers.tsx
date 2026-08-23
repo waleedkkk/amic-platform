@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { DataTable, LoadState, Panel, PageHeading, formatValue } from "@/components/market-ui";
 import { AdminAiProviderSettings } from "@/components/AdminAiProviderSettings";
 import { trpc } from "@/lib/trpc";
-import { Bot, ShieldCheck } from "lucide-react";
+import { Bot, Clock3, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
 
 export default function AdminUsers() {
@@ -11,6 +11,7 @@ export default function AdminUsers() {
   const { data, isLoading, error } = trpc.auth.admin.listUsers.useQuery(undefined, {
     enabled: user?.role === "admin",
   });
+  const registerCleanup = trpc.auth.admin.heartbeat.registerMarketSnapshotCleanup.useMutation();
 
   const rows =
     data?.map(row => ({
@@ -37,6 +38,22 @@ export default function AdminUsers() {
       ) : (
         <div className="space-y-6">
           <AdminAiProviderSettings />
+          <Panel>
+            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+              <div className="flex gap-3">
+                <Clock3 className="mt-0.5 size-4 shrink-0 text-primary" />
+                <div>
+                  <p className="text-sm font-medium text-foreground">تنظيف لقطات السوق المجدول</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">يسجل مهمة Heartbeat ساعةً بساعة مرة واحدة فقط. لا ينفذ الحذف إلا عندما يطابق معرّف المهمة المسجل في قاعدة البيانات.</p>
+                  {registerCleanup.data && <p className="mt-2 text-xs text-emerald-300">{registerCleanup.data.created ? "تم تسجيل المهمة بنجاح." : "المهمة مسجلة بالفعل."} المعرف: {registerCleanup.data.taskUid}</p>}
+                  {registerCleanup.error && <p className="mt-2 text-xs text-destructive">تعذر تسجيل المهمة: {registerCleanup.error.message}</p>}
+                </div>
+              </div>
+              <Button onClick={() => registerCleanup.mutate()} disabled={registerCleanup.isPending}>
+                {registerCleanup.isPending ? "جارٍ التسجيل…" : "تسجيل مهمة التنظيف"}
+              </Button>
+            </div>
+          </Panel>
           <LoadState loading={isLoading} error={error}>
             <Panel>
               <div className="mb-4 flex items-center gap-2 text-sm font-medium text-foreground">

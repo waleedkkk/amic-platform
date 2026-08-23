@@ -252,6 +252,13 @@ export const metalAlertMonitorSettings = mysqlTable("metalAlertMonitorSettings",
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const marketSnapshotCleanupMonitorSettings = mysqlTable("marketSnapshotCleanupMonitorSettings", {
+  id: int("id").primaryKey(),
+  scheduleTaskUid: varchar("scheduleTaskUid", { length: 65 }).unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const economicCalendarSubscriptions = mysqlTable("economicCalendarSubscriptions", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   enabled: int("enabled").default(0).notNull(),

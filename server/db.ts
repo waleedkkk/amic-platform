@@ -12,6 +12,7 @@ import {
   economicCalendarMonitorSettings,
   economicCalendarSubscriptions,
   InsertUser,
+  marketSnapshotCleanupMonitorSettings,
   marketSnapshots,
   metalAlertMonitorSettings,
   metalAlerts,
@@ -510,6 +511,17 @@ export async function saveDailyMarketDigestMonitorTaskUid(scheduleTaskUid: strin
 export async function getDailyMarketDigestMonitorTaskUid() {
   const db = await requireDb();
   const [settings] = await db.select().from(dailyMarketDigestMonitorSettings).where(eq(dailyMarketDigestMonitorSettings.id, 1)).limit(1);
+  return settings?.scheduleTaskUid ?? null;
+}
+
+export async function saveMarketSnapshotCleanupMonitorTaskUid(scheduleTaskUid: string) {
+  const db = await requireDb();
+  await db.insert(marketSnapshotCleanupMonitorSettings).values({ id: 1, scheduleTaskUid }).onDuplicateKeyUpdate({ set: { scheduleTaskUid, updatedAt: new Date() } });
+}
+
+export async function getMarketSnapshotCleanupMonitorTaskUid() {
+  const db = await requireDb();
+  const [settings] = await db.select().from(marketSnapshotCleanupMonitorSettings).where(eq(marketSnapshotCleanupMonitorSettings.id, 1)).limit(1);
   return settings?.scheduleTaskUid ?? null;
 }
 
