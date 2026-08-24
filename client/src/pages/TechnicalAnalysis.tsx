@@ -7,6 +7,7 @@ import { ConfluenceBreakdownPanel } from "@/components/ConfluenceBreakdownPanel"
 import { SessionHeatmapPanel } from "@/components/SessionHeatmapPanel";
 import { TimeframeAlignmentPanel } from "@/components/TimeframeAlignmentPanel";
 import { ExternalContextCards } from "@/components/ExternalContextCards";
+import { BinanceOrderFlowContextCard } from "@/components/BinanceOrderFlowContextCard";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
 import { formatValue, LoadState, MetricCard, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
 import { createSavedAnalysisPayload, getTechnicalDetailGroups, getTechnicalMetricCards, getUnavailableMetricLabels } from "@/lib/technicalAnalysisViewModel";
@@ -121,6 +122,8 @@ export default function TechnicalAnalysis() {
         </form>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-3.5" /><span>{updatedAt ? `آخر تحديث ${updatedAt.toLocaleTimeString("ar-EG")}` : "بانتظار أول تحديث"}</span><span>· تُحدَّث البيانات تلقائيًا كل دقيقة وقد تكون مؤجلة أو مخزنة مؤقتًا.</span></div>
       </Panel>
+
+      <BinanceOrderFlowContextCard symbol={params.symbol} exchange={params.exchange} />
 
       <div className="mt-6">
         <LoadState loading={query.isLoading} error={query.error}>
