@@ -1,18 +1,24 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "../_core/context";
 
 const databaseMocks = vi.hoisted(() => ({
   closeUserPaperTrade: vi.fn(),
   createPaperTrade: vi.fn(),
+  getUserClosedPaperTrade: vi.fn(),
   getUserPaperTradingSummary: vi.fn(),
+  getUserSignal: vi.fn(),
+  getUserPaperTradeCritique: vi.fn(),
   listUserPaperTrades: vi.fn(),
   listUserSignals: vi.fn(),
+  saveUserPaperTradeCritique: vi.fn(),
 }));
 
 const candleMocks = vi.hoisted(() => ({ getCandleHistoryCached: vi.fn() }));
+const critiqueMocks = vi.hoisted(() => ({ generatePaperTradeCritique: vi.fn() }));
 
 vi.mock("../db", () => databaseMocks);
 vi.mock("../candles", () => candleMocks);
+vi.mock("../tradeCritique", () => critiqueMocks);
 
 import { paperTradingRouter } from "./paperTrading";
 
@@ -35,6 +41,8 @@ function createAuthenticatedContext(userId = 71): TrpcContext {
 }
 
 describe("paperTradingRouter", () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it("يقيّد قراءة المراكز بمعرّف المستخدم الموثق", async () => {
     databaseMocks.listUserPaperTrades.mockResolvedValue([]);
     const caller = paperTradingRouter.createCaller(createAuthenticatedContext(71));
@@ -68,6 +76,15 @@ describe("paperTradingRouter", () => {
     expect(databaseMocks.createPaperTrade).not.toHaveBeenCalled();
   });
 
+  it("يمرر signalId اختياريًا عند فتح صفقة من مسودة مرتبطة", async () => {
+    databaseMocks.createPaperTrade.mockResolvedValue({ id: 17 });
+    const caller = paperTradingRouter.createCaller(createAuthenticatedContext(71));
+
+    await caller.open({ symbol: "BTCUSDT", exchange: "BINANCE", assetClass: "crypto", side: "long", quantity: "1", entryPrice: "100", signalId: 41 });
+
+    expect(databaseMocks.createPaperTrade).toHaveBeenCalledWith(71, expect.objectContaining({ signalId: 41 }));
+  });
+
   it("يعيد ملخص الأداء للمستخدم الموثق فقط", async () => {
     databaseMocks.getUserPaperTradingSummary.mockResolvedValue({
       totalTrades: 4,
@@ -90,5 +107,37 @@ describe("paperTradingRouter", () => {
 
     await expect(caller.signalPerformance()).resolves.toMatchObject({ trackedSignals: 1, successfulSignals: 1, winRate: 100 });
     expect(databaseMocks.listUserSignals).toHaveBeenCalledWith(71);
+  });
+
+  it("يستخدم الإشارة الصريحة حتى مع وجود إشارة أحدث للرمز والبورصة نفسيهما", async () => {
+    databaseMocks.getUserClosedPaperTrade.mockResolvedValue({ id: 9, userId: 71, signalId: 41, symbol: "BTCUSDT", exchange: "BINANCE", side: "long", quantity: "1", entryPrice: "100", exitPrice: "110", stopLoss: "95", takeProfit: "115", realizedPnl: "10", openedAt: new Date("2026-08-24T12:00:00.000Z"), closedAt: new Date("2026-08-24T13:00:00.000Z") });
+    databaseMocks.getUserSignal.mockResolvedValue({ id: 41, symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "1h", recommendation: "buy", confidence: 70, summary: "الإشارة المؤكدة", createdAt: new Date("2026-08-24T11:59:00.000Z") });
+    databaseMocks.listUserSignals.mockResolvedValue([{ id: 42, symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "1h", recommendation: "sell", confidence: 80, summary: "إشارة أحدث", createdAt: new Date("2026-08-24T12:01:00.000Z") }]);
+    critiqueMocks.generatePaperTradeCritique.mockResolvedValue({ disclaimer: "تعليمي فقط؛ لا يمثل توصية تداول." });
+    databaseMocks.saveUserPaperTradeCritique.mockResolvedValue({ paperTradeId: 9, content: { disclaimer: "تعليمي فقط؛ لا يمثل توصية تداول." } });
+    const caller = paperTradingRouter.createCaller(createAuthenticatedContext(71));
+
+    await caller.critique.generate({ tradeId: 9 });
+
+    expect(databaseMocks.getUserSignal).toHaveBeenCalledWith(71, 41);
+    expect(databaseMocks.listUserSignals).not.toHaveBeenCalled();
+    expect(critiqueMocks.generatePaperTradeCritique).toHaveBeenCalledWith(expect.objectContaining({ linkType: "confirmed", signal: expect.objectContaining({ summary: "الإشارة المؤكدة" }) }));
+  });
+
+  it("يبقي الصفقات القديمة دون signalId عاملة عبر التخمين السابق الأقرب فقط", async () => {
+    databaseMocks.getUserClosedPaperTrade.mockResolvedValue({ id: 10, userId: 71, signalId: null, symbol: "BTCUSDT", exchange: "BINANCE", side: "long", quantity: "1", entryPrice: "100", exitPrice: "110", stopLoss: "95", takeProfit: "115", realizedPnl: "10", openedAt: new Date("2026-08-24T12:00:00.000Z"), closedAt: new Date("2026-08-24T13:00:00.000Z") });
+    databaseMocks.listUserSignals.mockResolvedValue([
+      { id: 1, symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "1h", recommendation: "buy", confidence: 70, summary: "إشارة سابقة بعيدة", createdAt: new Date("2026-08-24T10:00:00.000Z") },
+      { id: 2, symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "1h", recommendation: "buy", confidence: 70, summary: "إشارة سابقة قريبة", createdAt: new Date("2026-08-24T11:58:00.000Z") },
+      { id: 3, symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "1h", recommendation: "sell", confidence: 70, summary: "إشارة لاحقة", createdAt: new Date("2026-08-24T12:01:00.000Z") },
+    ]);
+    critiqueMocks.generatePaperTradeCritique.mockResolvedValue({ disclaimer: "تعليمي فقط؛ لا يمثل توصية تداول." });
+    databaseMocks.saveUserPaperTradeCritique.mockResolvedValue({ paperTradeId: 10, content: { disclaimer: "تعليمي فقط؛ لا يمثل توصية تداول." } });
+    const caller = paperTradingRouter.createCaller(createAuthenticatedContext(71));
+
+    await caller.critique.generate({ tradeId: 10 });
+
+    expect(databaseMocks.getUserSignal).not.toHaveBeenCalled();
+    expect(critiqueMocks.generatePaperTradeCritique).toHaveBeenCalledWith(expect.objectContaining({ linkType: "guessed", signal: expect.objectContaining({ summary: "إشارة سابقة قريبة" }) }));
   });
 });

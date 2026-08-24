@@ -98,6 +98,7 @@ export type PaperTradeInput = {
   stopLoss?: string;
   takeProfit?: string;
   note?: string;
+  signalId?: number;
 };
 
 export async function listUserPaperTrades(userId: number) {
@@ -113,8 +114,20 @@ export async function createPaperTrade(userId: number, input: PaperTradeInput) {
     throw new Error("الكمية وسعر الدخول يجب أن يكونا رقمين موجبين.");
   }
 
+  let signalId: number | null = null;
+  if (input.signalId !== undefined) {
+    const [signal] = await db
+      .select({ id: savedSignals.id })
+      .from(savedSignals)
+      .where(and(eq(savedSignals.id, input.signalId), eq(savedSignals.userId, userId)))
+      .limit(1);
+    if (!signal) throw new Error("لا يمكن ربط الصفقة بإشارة لا تملكها.");
+    signalId = signal.id;
+  }
+
   const result = await db.insert(paperTrades).values({
     userId,
+    signalId,
     symbol: input.symbol.toUpperCase(),
     exchange: input.exchange.toUpperCase(),
     assetClass: input.assetClass,
@@ -246,6 +259,16 @@ export async function createUserSignal(userId: number, input: Omit<InsertSavedSi
 export async function listUserSignals(userId: number) {
   const db = await requireDb();
   return db.select().from(savedSignals).where(eq(savedSignals.userId, userId)).orderBy(desc(savedSignals.createdAt));
+}
+
+export async function getUserSignal(userId: number, signalId: number) {
+  const db = await requireDb();
+  const [signal] = await db
+    .select()
+    .from(savedSignals)
+    .where(and(eq(savedSignals.id, signalId), eq(savedSignals.userId, userId)))
+    .limit(1);
+  return signal ?? null;
 }
 
 export async function deleteUserSignal(userId: number, signalId: number) {

@@ -1,5 +1,7 @@
 export type TechnicalSignal = "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell" | null;
 
+import type { CorrelationContext } from "./correlationContext";
+
 export type TechnicalAnalysis = {
   schemaVersion: 1;
   source: "tradingview-mcp" | "candle-history";
@@ -45,6 +47,7 @@ export type TechnicalAnalysis = {
     strength: string | null;
     momentumAligned: boolean | null;
   };
+  correlationContext?: CorrelationContext;
 };
 
 export type MultiTimeframeFrame = {

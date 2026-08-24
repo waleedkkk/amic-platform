@@ -8,6 +8,7 @@ import { SessionHeatmapPanel } from "@/components/SessionHeatmapPanel";
 import { TimeframeAlignmentPanel } from "@/components/TimeframeAlignmentPanel";
 import { ExternalContextCards } from "@/components/ExternalContextCards";
 import { BinanceOrderFlowContextCard } from "@/components/BinanceOrderFlowContextCard";
+import { CorrelationContextPanel } from "@/components/CorrelationContextPanel";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
 import { formatValue, LoadState, MetricCard, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
 import { createSavedAnalysisPayload, getTechnicalDetailGroups, getTechnicalMetricCards, getUnavailableMetricLabels } from "@/lib/technicalAnalysisViewModel";
@@ -65,8 +66,8 @@ export default function TechnicalAnalysis() {
     });
   }, []);
 
-  const handleSave = () => {
-    if (!data) return toast.error("انتظر وصول التحليل قبل حفظ الإشارة.");
+  const buildSignalInput = () => {
+    if (!data) return null;
     const normalized = String(recommendation ?? "neutral").toLowerCase().replace(/[ -]/g, "_");
     const recommendationValue = ["strong_buy", "buy", "neutral", "sell", "strong_sell"].includes(normalized)
       ? normalized as "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell"
@@ -74,9 +75,9 @@ export default function TechnicalAnalysis() {
     const crossoverLabel = movingAverageCrossover?.kind === "golden"
       ? "التقاطع الذهبي (SMA 20 فوق SMA 50)"
       : movingAverageCrossover?.kind === "death"
-        ? "تقاطع الموت (SMA 20 دون SMA 50)"
+      ? "تقاطع الموت (SMA 20 دون SMA 50)"
         : null;
-    saveSignal.mutate({
+    return {
       symbol: params.symbol,
       exchange: params.exchange,
       timeframe: params.timeframe,
@@ -84,10 +85,16 @@ export default function TechnicalAnalysis() {
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(100, confidence)) : 0,
       summary: `قراءة ${params.symbol} على ${params.timeframe}: ${String(recommendation ?? "غير محدد")}${crossoverLabel ? ` · ${crossoverLabel}` : ""}`,
       analysisPayload: createSavedAnalysisPayload(data, movingAverageCrossover),
-    });
+    };
   };
 
-  const handlePaperTrade = () => {
+  const handleSave = () => {
+    const signalInput = buildSignalInput();
+    if (!signalInput) return toast.error("انتظر وصول التحليل قبل حفظ الإشارة.");
+    saveSignal.mutate(signalInput);
+  };
+
+  const handlePaperTrade = async () => {
     const draft = makeAnalysisTradeDraft({
       symbol: params.symbol,
       exchange: params.exchange,
@@ -98,8 +105,15 @@ export default function TechnicalAnalysis() {
       note: `مسودة من التحليل الفني ${params.timeframe}.`,
     });
     if (!draft) return toast.error("تحتاج القراءة إلى توصية صريحة وسعر صالح قبل إنشاء مسودة صفقة.");
-    storePaperTradeDraft(draft);
-    navigate("/paper-trading");
+    const signalInput = buildSignalInput();
+    if (!signalInput) return toast.error("انتظر وصول التحليل قبل إنشاء مسودة صفقة.");
+    try {
+      const signal = await saveSignal.mutateAsync(signalInput);
+      storePaperTradeDraft({ ...draft, signalId: signal.id });
+      navigate("/paper-trading");
+    } catch {
+      // يعرض مسار mutation رسالة الخطأ؛ لا تنتقل إلى نموذج بلا ربط صريح.
+    }
   };
 
   return (
@@ -137,6 +151,7 @@ export default function TechnicalAnalysis() {
             {metrics.map(metric => <MetricCard key={metric.id} label={metric.label} value={formatValue(metric.value, metric.digits)} detail={metric.detail} icon={metricIcon(metric.id)} />)}
           </div>
           <PriceChart symbol={params.symbol} exchange={params.exchange} onCrossoverChange={handleCrossoverChange} proposedRiskLevels={chartRiskLevels} />
+          <CorrelationContextPanel context={data?.correlationContext} />
           <TimeframeAlignmentPanel symbol={params.symbol} exchange={params.exchange} atr={data?.indicators.atr.value ?? null} price={price} />
           <ExternalContextCards symbol={params.symbol} exchange={params.exchange} />
           <ConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} interval={params.timeframe === "1h" ? "60m" : params.timeframe === "1D" ? "1d" : params.timeframe === "1W" ? "1wk" : params.timeframe} />
@@ -149,7 +164,7 @@ export default function TechnicalAnalysis() {
 
           <div className="mt-6 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
             <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">SIGNAL READOUT</p><div className="mt-4 flex flex-wrap items-center gap-3"><SignalBadge value={recommendation} /><span className="text-sm text-muted-foreground">مخرجات معيارية موحدة من مزود التحليل الحالي للأصل والإطار المحددين.</span></div><div className="mt-6 grid gap-3 sm:grid-cols-3">{metrics.slice(1).map(metric => <div key={metric.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4"><p className="text-xs uppercase tracking-wider text-muted-foreground">{metric.id}</p><p className="mt-3 font-mono text-lg">{formatValue(metric.value, metric.digits)}</p></div>)}</div></Panel>
-            <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">KEEP THE CONTEXT</p><h2 className="mt-3 text-xl font-semibold">حفظ الإشارة أو تحويلها</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">يحفظ السجل نسخة ذات إصدار من عقد التحليل مع سياق المخطط. لا تُرسل أي أوامر حقيقية ولا تمثل القيم الافتراضية توصية استثمارية.</p><div className="mt-6 grid gap-2"><Button onClick={handleSave} disabled={saveSignal.isPending || !data}><BookmarkPlus className="ml-2 size-4" />حفظ في سجل الإشارات</Button><Button variant="outline" onClick={handlePaperTrade} disabled={!data} className="bg-white/[0.03]">فتح مسودة صفقة ورقية</Button></div></Panel>
+            <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">KEEP THE CONTEXT</p><h2 className="mt-3 text-xl font-semibold">حفظ الإشارة أو تحويلها</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">يحفظ السجل نسخة ذات إصدار من عقد التحليل مع سياق المخطط. لا تُرسل أي أوامر حقيقية ولا تمثل القيم الافتراضية توصية استثمارية.</p><div className="mt-6 grid gap-2"><Button onClick={handleSave} disabled={saveSignal.isPending || !data}><BookmarkPlus className="ml-2 size-4" />حفظ في سجل الإشارات</Button><Button variant="outline" onClick={() => { void handlePaperTrade(); }} disabled={!data || saveSignal.isPending} className="bg-white/[0.03]">فتح مسودة صفقة ورقية</Button></div></Panel>
           </div>
         </LoadState>
       </div>

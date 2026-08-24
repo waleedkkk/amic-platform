@@ -28,12 +28,32 @@ export default function Confluence() {
   const resolvedPrice = data ? resolveConfluenceDisplayPrice(quote.data?.price, data) : { price: null, source: "unavailable" as const, timeframe: null };
   const referencePrice = resolvedPrice.price;
   const priceSource = resolvedPrice.source === "live" ? "اقتباس حي" : resolvedPrice.source === "frame" ? `سعر مرجعي من ${resolvedPrice.timeframe}` : "غير متاح";
+  const saveSignal = trpc.signals.save.useMutation({ onError: error => toast.error(error.message) });
 
-  const handlePaperTrade = () => {
+  const handlePaperTrade = async () => {
     const draft = makeAnalysisTradeDraft({ symbol: params.symbol, exchange: params.exchange, recommendation: aggregateSignal, price: referencePrice, supportLevels, resistanceLevels, note: "مسودة من توافق الأطر الزمنية." });
     if (!draft) return toast.error("تحتاج قراءة التوافق إلى اتجاه صريح وسعر سوق متاح قبل إنشاء مسودة.");
-    storePaperTradeDraft(draft);
-    navigate("/paper-trading");
+    if (!data) return toast.error("انتظر وصول قراءة التوافق قبل إنشاء مسودة صفقة.");
+    const normalized = String(aggregateSignal ?? "neutral").toLowerCase().replace(/[ -]/g, "_");
+    const recommendation = ["strong_buy", "buy", "neutral", "sell", "strong_sell"].includes(normalized)
+      ? normalized as "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell"
+      : "neutral";
+    try {
+      const signal = await saveSignal.mutateAsync({
+        symbol: params.symbol,
+        exchange: params.exchange,
+        timeframe: data.recommendation.entryTimeframe ?? "MULTI",
+        recommendation,
+        confidence: 0,
+        summary: data.recommendation.summary ?? `قراءة توافق الأطر لـ ${params.symbol}.`,
+        analysisPayload: { sourceType: "multi_timeframe", analysis: data, referencePrice, priceSource },
+      });
+      storePaperTradeDraft({ ...draft, signalId: signal.id });
+      toast.success("حُفظ سياق التوافق ورُبط بمسودة الصفقة.");
+      navigate("/paper-trading");
+    } catch {
+      // يعرض مسار mutation رسالة الخطأ؛ لا تنتقل إلى نموذج بلا ربط صريح.
+    }
   };
 
   return (
@@ -43,7 +63,7 @@ export default function Confluence() {
       <div className="mt-6"><LoadState loading={query.isLoading} error={query.error}>
         <div className="grid gap-4 md:grid-cols-5">{frames.map(frame => <MetricCard key={frame} label={frame} value={describeConfluenceFrame(timeframes[frame])} detail="قراءة الإطار" icon={<ChartNoAxesCombined className="size-4 text-primary" />} />)}</div>
         <div className="mt-6 grid gap-4 lg:grid-cols-[0.75fr_1.25fr]">
-          <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">AGGREGATE READ</p><div className="mt-4"><SignalBadge value={aggregateSignal ?? "لم تُجمع قراءة بعد"} /></div><p className="mt-4 text-sm leading-7 text-muted-foreground">يُظهر هذا الملخص العقد المعياري الثابت للتحليل متعدد الأطر، ويُستخدم كسياق تعليمي لا كتعليمات تداول.</p><p className="mt-3 font-mono text-xs text-muted-foreground">السعر المرجعي: {referencePrice ? formatValue(referencePrice, 6) : "غير متاح"} · {priceSource}</p><Button variant="outline" onClick={handlePaperTrade} disabled={!data || !referencePrice} className="mt-5 w-full bg-white/[0.03]">فتح مسودة صفقة ورقية من التوافق</Button></Panel>
+          <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">AGGREGATE READ</p><div className="mt-4"><SignalBadge value={aggregateSignal ?? "لم تُجمع قراءة بعد"} /></div><p className="mt-4 text-sm leading-7 text-muted-foreground">يُظهر هذا الملخص العقد المعياري الثابت للتحليل متعدد الأطر، ويُستخدم كسياق تعليمي لا كتعليمات تداول.</p><p className="mt-3 font-mono text-xs text-muted-foreground">السعر المرجعي: {referencePrice ? formatValue(referencePrice, 6) : "غير متاح"} · {priceSource}</p><Button variant="outline" onClick={() => { void handlePaperTrade(); }} disabled={!data || !referencePrice || saveSignal.isPending} className="mt-5 w-full bg-white/[0.03]">فتح مسودة صفقة ورقية من التوافق</Button></Panel>
           <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">CONTRACT STATUS</p><div className="mt-4 grid gap-3 sm:grid-cols-3"><MetricCard label="الإصدار" value={data?.schemaVersion ?? "—"} detail="عقد توافق الأطر" /><MetricCard label="المصدر" value={data?.source ?? "—"} detail="مصدر التحليل" /><MetricCard label="الدرجة الصافية" value={formatValue(data?.alignment.netScore, 2)} detail={data?.alignment.status ?? "حالة التوافق"} /></div><p className="mt-4 text-xs leading-6 text-muted-foreground">الأطر المتعارضة: {data?.alignment.divergentTimeframes.length ? data.alignment.divergentTimeframes.join("، ") : "لا توجد أطر متعارضة مُبلّغ عنها"}</p>{data?.recommendation.rules.length ? <ul className="mt-4 list-inside list-disc space-y-1 text-sm text-muted-foreground">{data.recommendation.rules.map(rule => <li key={rule}>{rule}</li>)}</ul> : null}</Panel>
         </div>
         <ConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} />

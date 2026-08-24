@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { closeUserPaperTrade, createPaperTrade, getUserClosedPaperTrade, getUserPaperTradeCritique, getUserPaperTradingSummary, listUserPaperTrades, listUserSignals, saveUserPaperTradeCritique } from "../db";
+import { closeUserPaperTrade, createPaperTrade, getUserClosedPaperTrade, getUserPaperTradeCritique, getUserPaperTradingSummary, getUserSignal, listUserPaperTrades, listUserSignals, saveUserPaperTradeCritique } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getCandleHistoryCached } from "../candles";
 import { assessSignalFollowThrough, summarizeSignalFollowThrough } from "../signalPerformance";
 import { generatePaperTradeCritique } from "../tradeCritique";
+import { guessClosestPriorSignal, type SignalLinkType } from "../paperTradeSignalLink";
 
 const tradeInput = z.object({
   symbol: z.string().trim().min(1).max(32),
@@ -15,6 +16,7 @@ const tradeInput = z.object({
   stopLoss: z.string().regex(/^\d+(\.\d+)?$/).optional(),
   takeProfit: z.string().regex(/^\d+(\.\d+)?$/).optional(),
   note: z.string().trim().max(500).optional(),
+  signalId: z.number().int().positive().optional(),
 });
 
 export const paperTradingRouter = router({
@@ -44,9 +46,23 @@ export const paperTradingRouter = router({
     generate: protectedProcedure.input(z.object({ tradeId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const trade = await getUserClosedPaperTrade(ctx.user.id, input.tradeId);
       if (!trade) throw new Error("لا يمكن إنشاء نقد إلا لصفقة مغلقة تملكها.");
-      const signals = await listUserSignals(ctx.user.id);
-      const signal = signals.find(item => item.symbol === trade.symbol && item.exchange === trade.exchange);
-      const content = await generatePaperTradeCritique({ trade, signal: signal ? { timeframe: signal.timeframe, recommendation: signal.recommendation, confidence: signal.confidence, summary: signal.summary } : null });
+      let signal = null;
+      let linkType: SignalLinkType = "none";
+
+      if (trade.signalId !== null) {
+        signal = await getUserSignal(ctx.user.id, trade.signalId);
+        linkType = signal ? "confirmed" : "none";
+      } else {
+        const signals = await listUserSignals(ctx.user.id);
+        signal = guessClosestPriorSignal(trade, signals);
+        linkType = signal ? "guessed" : "none";
+      }
+
+      const content = await generatePaperTradeCritique({
+        trade,
+        linkType,
+        signal: signal ? { timeframe: signal.timeframe, recommendation: signal.recommendation, confidence: signal.confidence, summary: signal.summary } : null,
+      });
       return saveUserPaperTradeCritique(ctx.user.id, input.tradeId, content);
     }),
   }),

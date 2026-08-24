@@ -15,12 +15,14 @@ import { getFitContentKey } from "@/lib/chartViewport";
 import { CHART_INTERVALS, chartIntervalStorageKey, isStoredChartInterval } from "@/lib/chartIntervalPreference";
 import { isIctChartLayerVisible, isLegacyChartLayerVisible } from "@/lib/chartLayerComposition";
 import { shouldMergeLiveQuoteIntoLastCandle } from "@/lib/chartQuoteIntegrity";
+import { ICT_CONFIRMATION_TOOLTIPS } from "@/lib/ictSettingHelp";
 import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import { StructureInsightPanel } from "@/components/StructureInsightPanel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { describeCandleDataStatus, getMarketAssetProfile } from "@shared/marketAssetProfile";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateConfluenceIct, ICT_MAX_SCORE, type ConfluenceIctSettings } from "@shared/confluenceIct";
-import { Maximize2, Minimize2, Radio, SlidersHorizontal } from "lucide-react";
+import { CircleHelp, Maximize2, Minimize2, Radio, SlidersHorizontal } from "lucide-react";
 import {
   CandlestickSeries,
   createTextWatermark,
@@ -124,6 +126,28 @@ type StructureDecorations = {
 };
 
 type ProposedRiskLevels = { stopLoss: string; takeProfit: string; stopLossSource: RiskLevelSource; takeProfitSource: RiskLevelSource };
+
+function IctSettingLabel({ label, help }: { label: string; help: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+      {label}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`شرح ${label}`}
+            className="inline-flex size-4 items-center justify-center rounded-full text-primary/80 outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <CircleHelp className="size-3.5" aria-hidden="true" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={8} dir="rtl" className="max-w-72 text-right leading-5">
+          {help}
+        </TooltipContent>
+      </Tooltip>
+    </span>
+  );
+}
 
 export function CandlestickChart(props: { symbol: string; exchange: string; onCrossoverChange?: (crossover: MovingAverageCrossover | null, interval: ChartInterval) => void; proposedRiskLevels?: ProposedRiskLevels | null }) {
   const { symbol, exchange, onCrossoverChange, proposedRiskLevels } = props;
@@ -850,8 +874,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <label className="grid gap-1.5"><span className="text-muted-foreground">Liquidity tolerance %</span><input type="number" min="0.01" step="0.01" value={preferences.confluenceIct.settings.liquidityTolerancePercent} onChange={event => updateConfluenceSetting("liquidityTolerancePercent", Number(event.target.value))} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground" /></label>
             <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.requireSweep} onChange={event => updateConfluenceSetting("requireSweep", event.target.checked)} /><span>اشتراط Sweep</span></label>
             <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.requireFvg} onChange={event => updateConfluenceSetting("requireFvg", event.target.checked)} /><span>اشتراط FVG</span></label>
-            <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.ictConfirmMode} onChange={event => updateConfluenceSetting("ictConfirmMode", event.target.checked)} disabled={preferences.confluenceIct.settings.mode === "scalping"} /><span>اشتراط تأكيد ICT بالوضع الطبيعي</span></label>
-            <label className="grid gap-1.5"><span className="text-muted-foreground">حد تأكيد ICT</span><input type="number" min="1" max={ICT_MAX_SCORE} value={preferences.confluenceIct.settings.ictConfirmThreshold} onChange={event => updateConfluenceSetting("ictConfirmThreshold", Number(event.target.value))} disabled={preferences.confluenceIct.settings.mode === "scalping" || !preferences.confluenceIct.settings.ictConfirmMode} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground disabled:opacity-45" /></label>
+            <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.ictConfirmMode} onChange={event => updateConfluenceSetting("ictConfirmMode", event.target.checked)} disabled={preferences.confluenceIct.settings.mode === "scalping"} /><IctSettingLabel label="اشتراط تأكيد ICT بالوضع الطبيعي" help={ICT_CONFIRMATION_TOOLTIPS.mode} /></label>
+            <label className="grid gap-1.5"><IctSettingLabel label="حد تأكيد ICT" help={ICT_CONFIRMATION_TOOLTIPS.threshold} /><input type="number" min="1" max={ICT_MAX_SCORE} value={preferences.confluenceIct.settings.ictConfirmThreshold} onChange={event => updateConfluenceSetting("ictConfirmThreshold", Number(event.target.value))} disabled={preferences.confluenceIct.settings.mode === "scalping" || !preferences.confluenceIct.settings.ictConfirmMode} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground disabled:opacity-45" /></label>
           </div>
         ) : null}
         <div className={`relative overflow-hidden rounded-xl ${isChartFullscreen ? "min-h-0 flex-1" : "h-[340px] min-h-[260px] sm:h-[440px] lg:h-[520px]"}`}>

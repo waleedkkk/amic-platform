@@ -8,6 +8,7 @@ export type PaperTradeDraft = {
   stopLoss: string;
   takeProfit: string;
   note: string;
+  signalId?: number;
   riskSources?: {
     stopLossSource: RiskLevelSource;
     takeProfitSource: RiskLevelSource;
@@ -162,7 +163,7 @@ export function assessTradeDecisionReadiness(input: Pick<PaperTradeDraft, "symbo
   return { status: "ready", title: "جاهزة للمراجعة", summary: "المسودة مكتملة حسابيًا؛ راجع قيمها بنفسك قبل فتح الصفقة المحاكاة.", missing: [], warnings: [], riskRewardRatio: risk.riskRewardRatio, sourceNotes };
 }
 
-export function makeAnalysisTradeDraft(input: { symbol: string; exchange: string; recommendation: unknown; price: unknown; note: string } & AnalysisRiskInput): PaperTradeDraft | null {
+export function makeAnalysisTradeDraft(input: { symbol: string; exchange: string; recommendation: unknown; price: unknown; note: string; signalId?: number } & AnalysisRiskInput): PaperTradeDraft | null {
   const side = recommendationToSide(input.recommendation);
   const entryPrice = Number(input.price);
   if (!side || !Number.isFinite(entryPrice) || entryPrice <= 0) return null;
@@ -178,6 +179,7 @@ export function makeAnalysisTradeDraft(input: { symbol: string; exchange: string
     stopLoss: riskLevels.stopLoss,
     takeProfit: riskLevels.takeProfit,
     note: `${input.note} وقف الخسارة وجني الأرباح مقترحان من ${riskLevels.basis}، ويظلان قابلين للتعديل وليسا توصية استثمارية.`,
+    signalId: input.signalId,
     riskSources: { stopLossSource: riskLevels.stopLossSource, takeProfitSource: riskLevels.takeProfitSource },
   };
 }

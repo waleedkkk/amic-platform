@@ -26,6 +26,12 @@ describe("suggestRiskLevels", () => {
     expect(draft?.note).toContain("قابلين للتعديل");
   });
 
+  it("يحافظ على معرّف الإشارة المصدرية عند تحويل التحليل إلى مسودة", () => {
+    const draft = makeAnalysisTradeDraft({ symbol: "BTCUSDT", exchange: "BINANCE", recommendation: "buy", price: 100, note: "اختبار", signalId: 41 });
+
+    expect(draft?.signalId).toBe(41);
+  });
+
   it("calculates risk reward and warns when long risk levels are reversed", () => {
     expect(assessTradeRisk({ side: "long", entryPrice: "100", stopLoss: "95", takeProfit: "110" })).toMatchObject({ riskRewardRatio: 2, warnings: [] });
     expect(assessTradeRisk({ side: "long", entryPrice: "100", stopLoss: "101", takeProfit: "99" }).warnings).toEqual([

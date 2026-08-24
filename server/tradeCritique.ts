@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { invokeLLM } from "./_core/llm";
+import type { SignalLinkType } from "./paperTradeSignalLink";
 
 const critiqueSchema = z.object({
   planAdherence: z.array(z.string().min(1).max(220)).max(3),
@@ -15,13 +16,24 @@ export type PaperTradeCritique = z.infer<typeof critiqueSchema>;
 type CritiqueInput = {
   trade: { symbol: string; exchange: string; side: string; quantity: string; entryPrice: string; exitPrice: string | null; stopLoss: string | null; takeProfit: string | null; realizedPnl: string | null; openedAt: Date; closedAt: Date | null };
   signal: { timeframe: string; recommendation: string; confidence: number; summary: string } | null;
+  linkType: SignalLinkType;
 };
 
 export function buildPaperTradeCritiquePrompt(input: CritiqueInput) {
+  const signalContext = input.linkType === "confirmed"
+    ? `نوع الربط بالإشارة: confirmed (ربط مؤكد).
+الإشارة الأصلية المتاحة: ${JSON.stringify(input.signal)}`
+    : input.linkType === "guessed"
+      ? `نوع الربط بالإشارة: guessed (مطابقة تقريبية غير مؤكدة).
+إشارة مطابقة تقريبيًا بالرمز والتوقيت، ولا يوجد تأكيد بأنها الإشارة التي بُنيت عليها الصفقة فعليًا: ${JSON.stringify(input.signal)}
+تعامل مع أي استنتاج مبني على هذه الإشارة بحذر معلن داخل نص النقد، ولا تقدمه كحقيقة مؤكدة.`
+      : `نوع الربط بالإشارة: none.
+لا توجد إشارة مصدر متاحة لهذه الصفقة: null.`;
+
   return `حلّل صفقة ورقية مغلقة تحليلًا تعليميًا موجزًا ومبنيًا على البيانات فقط. ركز على الالتزام بالخطة القابلة للقياس (وجود وقف/هدف واتجاههما وسعر الدخول والخروج)، توقيت الدخول والخروج مقارنةً ببيانات الإشارة المتاحة، وما يصلح تكراره أو تحسينه. لا تستنتج المشاعر أو الدوافع أو السمات الشخصية، ولا تصف المستخدم أو تحكم عليه. لا تقدم توقعًا سعريًا ولا توصية بفتح أو إغلاق صفقة.
 
 بيانات الصفقة: ${JSON.stringify(input.trade)}
-الإشارة الأصلية المتاحة: ${JSON.stringify(input.signal)}
+${signalContext}
 
 أعد العربية فقط وضمن البنية المطلوبة. عند غياب معلومة، اذكر بوضوح أن التقييم غير ممكن من البيانات المتاحة بدل التخمين.`;
 }

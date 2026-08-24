@@ -8,6 +8,7 @@ import { getTwelveDataLiveQuote } from "../twelveDataStream";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences } from "../../shared/chartPreferences";
 import { normalizeMultiTimeframeAnalysis, normalizeTechnicalAnalysis } from "../technicalAnalysis";
+import { fetchCorrelationContext } from "../correlationContext";
 import { correlationFromCandles } from "../../shared/correlation";
 import { DEFAULT_MARKET_PULSE_SECTIONS, MARKET_PULSE_SECTION_KEYS, normalizeMarketPulseSections } from "../../shared/marketPulsePreferences";
 import { MAX_EXTERNAL_CONTEXT_REFERENCES, normalizeExternalContextReferences } from "../../shared/analysisExternalContext";
@@ -79,14 +80,21 @@ function technicalTimeframeToCandleInterval(value: z.infer<typeof timeframe>): C
 }
 
 async function fetchTechnicalAnalysisWithFallback(input: { symbol: string; exchange: string; timeframe: z.infer<typeof timeframe> }) {
+  let analysis;
   try {
-    return normalizeTechnicalAnalysis(await callTradingViewTool("coin_analysis", input), input);
+    analysis = normalizeTechnicalAnalysis(await callTradingViewTool("coin_analysis", input), input);
   } catch (error) {
     if (!isTradingViewMcpAvailabilityError(error)) throw error;
     const interval = technicalTimeframeToCandleInterval(input.timeframe);
     const history = await getCandleHistoryCached(input.symbol, input.exchange, interval, intervalToRange(interval), 250);
-    return deriveTechnicalAnalysisFromCandles(history, input);
+    analysis = deriveTechnicalAnalysisFromCandles(history, input);
   }
+  if (analysis.source === "candle-history") return analysis;
+  const correlationContext = await fetchCorrelationContext(input, analysis.price.changePercent).catch(error => {
+    console.warn("[CorrelationContext] Context was unavailable without affecting core analysis", { reason: error instanceof Error ? error.message.slice(0, 240) : "سبب غير متاح" });
+    return undefined;
+  });
+  return { ...analysis, correlationContext };
 }
 
 function inferWatchlistAssetClass(symbol: string, exchange: string): "crypto" | "stock" | "forex" | "futures" {

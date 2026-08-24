@@ -15,6 +15,7 @@ const databaseMocks = vi.hoisted(() => ({
 
 const mcpMocks = vi.hoisted(() => ({
   callTradingViewTool: vi.fn(),
+  isTradingViewMcpAvailabilityError: vi.fn(() => false),
   listTradingViewTools: vi.fn(),
   TRADINGVIEW_TOOL_NAMES: ["coin_analysis", "top_gainers", "rating_filter"] as const,
 }));
@@ -96,6 +97,22 @@ describe("marketRouter.analysis", () => {
       timeframe: "4h",
       payload: expect.objectContaining({ schemaVersion: 1, recommendation: expect.objectContaining({ signal: "buy" }) }),
     }));
+  });
+
+  it("يبقي التحليل الأساسي متاحًا عند تعذر أصل واحد من أصول السياق المترابط", async () => {
+    databaseMocks.getMarketSnapshot.mockResolvedValue(undefined);
+    databaseMocks.saveMarketSnapshot.mockResolvedValue(undefined);
+    mcpMocks.callTradingViewTool.mockImplementation(async (_name: string, args: Record<string, unknown>) => {
+      if (args.symbol === "DXY") throw new Error("رمز غير مدعوم");
+      if (args.symbol === "XAUUSD") return { price_data: { current_price: 2400, change_percent: 1.1 }, market_sentiment: { buy_sell_signal: "BUY" } };
+      return { price_data: { current_price: 100, change_percent: 0.5 }, market_sentiment: { buy_sell_signal: "NEUTRAL" } };
+    });
+    const caller = marketRouter.createCaller(publicContext);
+
+    const result = await caller.analysis({ symbol: "XAUUSD", exchange: "FX", timeframe: "1h" });
+
+    expect(result).toMatchObject({ symbol: "XAUUSD", price: { current: 2400 } });
+    expect(result.correlationContext?.items.map(item => item.id)).not.toContain("dxy");
   });
 
   it("يشارك التحميل الخارجي بين طلبين متزامنين للمفتاح نفسه", async () => {

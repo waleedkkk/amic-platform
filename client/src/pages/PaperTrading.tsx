@@ -21,6 +21,7 @@ type TradeForm = {
   stopLoss: string;
   takeProfit: string;
   note: string;
+  signalId?: number;
 };
 
 type DraftRiskSources = { stopLossSource: RiskLevelSource; takeProfitSource: RiskLevelSource };
@@ -46,7 +47,11 @@ export default function PaperTrading() {
   const riskAssessment = useMemo(() => assessTradeRisk(form), [form]);
   const refreshTrades = () => { void utils.paperTrading.list.invalidate(); void utils.paperTrading.summary.invalidate(); };
   const updateForm = (patch: Partial<TradeForm>, preservesRiskSources = false) => {
-    setForm(current => ({ ...current, ...patch }));
+    setForm(current => {
+      const changesInstrument = (patch.symbol !== undefined && patch.symbol.trim().toUpperCase() !== current.symbol.trim().toUpperCase())
+        || (patch.exchange !== undefined && patch.exchange.trim().toUpperCase() !== current.exchange.trim().toUpperCase());
+      return { ...current, ...patch, ...(changesInstrument ? { signalId: undefined } : {}) };
+    });
     if (!preservesRiskSources) setDraftRiskSources(null);
   };
 
@@ -70,7 +75,7 @@ export default function PaperTrading() {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (riskAssessment.warnings.length) return toast.error("صحّح تحذيرات المخاطرة والعائد قبل فتح الصفقة.");
-    open.mutate({ ...form, symbol: form.symbol.toUpperCase(), exchange: form.exchange.toUpperCase(), stopLoss: form.stopLoss || undefined, takeProfit: form.takeProfit || undefined, note: form.note || undefined });
+    open.mutate({ ...form, symbol: form.symbol.toUpperCase(), exchange: form.exchange.toUpperCase(), stopLoss: form.stopLoss || undefined, takeProfit: form.takeProfit || undefined, note: form.note || undefined, signalId: form.signalId });
   };
 
   const openTrades = trades.data?.filter(trade => trade.status === "open") ?? [];

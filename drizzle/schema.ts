@@ -47,6 +47,7 @@ export const paperTrades = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    signalId: int("signalId").references(() => savedSignals.id, { onDelete: "set null" }),
     symbol: varchar("symbol", { length: 64 }).notNull(),
     exchange: varchar("exchange", { length: 32 }).notNull(),
     assetClass: mysqlEnum("assetClass", ["crypto", "stock", "forex", "futures"]).notNull(),
@@ -67,6 +68,7 @@ export const paperTrades = mysqlTable(
   table => ({
     userStatusLookup: index("paper_trades_user_status_idx").on(table.userId, table.status),
     userCreatedLookup: index("paper_trades_user_created_idx").on(table.userId, table.createdAt),
+    signalLookup: index("paper_trades_signal_idx").on(table.signalId),
   }),
 );
 
