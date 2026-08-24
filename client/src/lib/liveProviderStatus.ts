@@ -4,7 +4,7 @@ export function describeLiveProviderStatus(status: ChartLiveProviderStatus, prov
   const name = provider === "binance" ? "Binance" : "Twelve Data";
   switch (status) {
     case "live":
-      return { label: `● بث حي · ${name}`, className: "font-mono text-emerald-300" };
+      return { label: provider === "binance" ? `● بث حي للشمعة · ${name}` : `● بث حي · ${name}`, className: "font-mono text-emerald-300" };
     case "connecting":
       return { label: `◌ جارٍ وصل ${name}`, className: "font-mono text-sky-300" };
     case "reconnecting":

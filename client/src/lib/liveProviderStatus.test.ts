@@ -7,6 +7,10 @@ describe("describeLiveProviderStatus", () => {
     expect(describeLiveProviderStatus("live", "twelve-data").label).toContain("بث حي");
   });
 
+  it("يوضح أن Binance يحدّث الشمعة الحالية عبر البث الحي", () => {
+    expect(describeLiveProviderStatus("live", "binance").label).toContain("للشمعة");
+  });
+
   it("يعرض حالة الاتصال الأولي بوضوح", () => {
     const presentation = describeLiveProviderStatus("connecting", "twelve-data");
     expect(presentation.label).toContain("جارٍ وصل");

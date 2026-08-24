@@ -5,11 +5,17 @@ import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
+import { isExpectedExternalAvailabilityError } from "./lib/apiErrorReporting";
 import "./index.css";
 const queryClient = new QueryClient();
 queryClient.getQueryCache().subscribe(event => {
   if (event.type === "updated" && event.action.type === "error") {
-    console.error("[API Query Error]", event.query.state.error);
+    const error = event.query.state.error;
+    if (isExpectedExternalAvailabilityError(error)) {
+      console.warn("[API Query Availability]", error);
+      return;
+    }
+    console.error("[API Query Error]", error);
   }
 });
 queryClient.getMutationCache().subscribe(event => {

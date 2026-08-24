@@ -2,7 +2,7 @@ export type TechnicalSignal = "strong_buy" | "buy" | "neutral" | "sell" | "stron
 
 export type TechnicalAnalysis = {
   schemaVersion: 1;
-  source: "tradingview-mcp";
+  source: "tradingview-mcp" | "candle-history";
   fetchedAt: string;
   sourceTimestamp: string | null;
   symbol: string;

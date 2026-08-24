@@ -20,7 +20,7 @@ import { StructureInsightPanel } from "@/components/StructureInsightPanel";
 import { describeCandleDataStatus, getMarketAssetProfile } from "@shared/marketAssetProfile";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateConfluenceIct, type ConfluenceIctSettings } from "@shared/confluenceIct";
-import { Maximize2, Minimize2, SlidersHorizontal } from "lucide-react";
+import { Maximize2, Minimize2, Radio, SlidersHorizontal } from "lucide-react";
 import {
   CandlestickSeries,
   createTextWatermark,
@@ -153,6 +153,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const stableKey = useMemo(() => `${exchange}:${symbol}:${interval}`, [exchange, symbol, interval]);
   const liveStreamUrl = useMemo(() => getBinanceKlineStream(symbol, exchange, interval), [symbol, exchange, interval]);
   const [liveCandle, setLiveCandle] = useState<LiveChartCandle | null>(null);
+  const [liveUpdatedAt, setLiveUpdatedAt] = useState<number | null>(null);
   const [olderHistoricalCandles, setOlderHistoricalCandles] = useState<LiveChartCandle[]>([]);
   const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const [liveStatus, setLiveStatus] = useState<ChartLiveProviderStatus>("delayed");
@@ -269,18 +270,42 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
 
   useEffect(() => {
     setLiveCandle(null);
+    setLiveUpdatedAt(null);
     if (!liveStreamUrl) {
       setLiveStatus("delayed");
       return;
     }
     let disposed = false;
     let retryTimer: number | undefined;
+    let syncTimer: number | undefined;
+    let pendingCandle: LiveChartCandle | null = null;
+    const syncLiveCandle = () => {
+      if (disposed || !pendingCandle) return;
+      setLiveCandle(pendingCandle);
+      setLiveUpdatedAt(pendingCandle.observedAt ?? Date.now());
+      pendingCandle = null;
+      syncTimer = undefined;
+    };
+    const updateSeriesImmediately = (candle: LiveChartCandle) => {
+      const lastHistorical = chartCandlesRef.current.at(-1);
+      if (!lastHistorical || candle.time < Number(lastHistorical.time)) return;
+      candleSeriesRef.current?.update({ time: candle.time as Time, open: candle.open, high: candle.high, low: candle.low, close: candle.close });
+      overlaysRef.current?.volume.update({ time: candle.time as Time, value: candle.volume, color: candle.close >= candle.open ? "rgba(22,163,74,0.45)" : "rgba(220,38,38,0.45)" });
+    };
     setLiveStatus(reconnectAttempt ? "reconnecting" : "connecting");
     const socket = new WebSocket(liveStreamUrl);
     socket.onopen = () => { if (!disposed) setLiveStatus("live"); };
     socket.onmessage = event => {
       const candle = parseBinanceKlineMessage(event.data);
-      if (candle && !disposed) setLiveCandle(candle);
+      if (!candle || disposed) return;
+      updateSeriesImmediately(candle);
+      pendingCandle = candle;
+      if (candle.isClosed) {
+        if (syncTimer) window.clearTimeout(syncTimer);
+        syncLiveCandle();
+      } else if (!syncTimer) {
+        syncTimer = window.setTimeout(syncLiveCandle, 750);
+      }
     };
     socket.onclose = () => {
       if (disposed) return;
@@ -291,6 +316,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     return () => {
       disposed = true;
       if (retryTimer) window.clearTimeout(retryTimer);
+      if (syncTimer) window.clearTimeout(syncTimer);
       socket.close();
     };
   }, [liveStreamUrl, reconnectAttempt]);
@@ -828,6 +854,14 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         ) : null}
         <div className={`relative overflow-hidden rounded-xl ${isChartFullscreen ? "min-h-0 flex-1" : "h-[340px] min-h-[260px] sm:h-[440px] lg:h-[520px]"}`}>
           <div ref={containerRef} className="h-full w-full" />
+          {exchange.toUpperCase() === "BINANCE" && liveCandle ? (
+            <div aria-live="polite" className="pointer-events-none absolute right-3 top-3 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center justify-end gap-x-2 gap-y-1 rounded-lg border border-emerald-400/25 bg-[#071017]/90 px-2.5 py-1.5 font-mono text-[10px] text-emerald-100 shadow-lg backdrop-blur-sm">
+              <span className="inline-flex items-center gap-1 font-semibold text-emerald-300"><Radio className="size-3" />WebSocket · Binance</span>
+              <span>السعر {liveCandle.close.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span>
+              <span>الحجم {liveCandle.volume.toLocaleString("en-US", { maximumFractionDigits: 3 })}</span>
+              {liveUpdatedAt ? <span className="text-emerald-200/75">{new Date(liveUpdatedAt).toLocaleTimeString("ar-EG")}</span> : null}
+            </div>
+          ) : null}
           {isLoadingOlderHistory ? (
             <div className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-md border border-white/[0.1] bg-black/65 px-2 py-1 text-[11px] text-muted-foreground shadow-lg">
               <Spinner className="size-3 text-primary" /> تحميل تاريخ أقدم…
@@ -881,6 +915,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                 {candlesQuery.data.exchangeName}
               </span>
               <span className={livePresentation.className}>{livePresentation.label}</span>
+              {exchange.toUpperCase() === "BINANCE" && liveCandle ? <span className="font-mono text-emerald-200">آخر شمعة {liveCandle.isClosed ? "مغلقة" : "جارية"} · حجم {liveCandle.volume.toLocaleString("en-US", { maximumFractionDigits: 3 })}</span> : null}
               <span className="font-mono text-muted-foreground">
                 الشموع: {candlesQuery.data.provider === "twelve-data" ? "Twelve Data مرخّص" : "Yahoo Finance احتياطي"}
               </span>

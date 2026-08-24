@@ -120,8 +120,14 @@ export default function TechnicalAnalysis() {
           <div><Label>الإطار الزمني</Label><Select value={form.timeframe} onValueChange={value => setForm({ ...form, timeframe: value as (typeof timeframes)[number] })}><SelectTrigger className="mt-2 bg-white/[0.025]"><SelectValue /></SelectTrigger><SelectContent>{timeframes.map(item => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select></div>
           <div className="flex items-end gap-2"><Button type="submit" className="flex-1">تحليل الرمز <CandleIcon className="mr-2 size-4" /></Button><Button type="button" variant="outline" className="shrink-0" onClick={() => query.refetch()} disabled={query.isFetching} aria-label="تحديث التحليل"><RefreshCw className={query.isFetching ? "size-4 animate-spin" : "size-4"} /></Button></div>
         </form>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-3.5" /><span>{updatedAt ? `آخر تحديث ${updatedAt.toLocaleTimeString("ar-EG")}` : "بانتظار أول تحديث"}</span><span>· تُحدَّث البيانات تلقائيًا كل دقيقة وقد تكون مؤجلة أو مخزنة مؤقتًا.</span></div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-3.5" /><span>{updatedAt ? `آخر تحديث ${updatedAt.toLocaleTimeString("ar-EG")}` : "بانتظار أول تحديث"}</span><span>· {params.exchange.toUpperCase() === "BINANCE" ? "التحليل يتحدث دوريًا؛ أما الشارت فيحدّث الشمعة الجارية عبر WebSocket." : "تُحدَّث البيانات تلقائيًا كل دقيقة وقد تكون مؤجلة أو مخزنة مؤقتًا."}</span></div>
       </Panel>
+
+      {data?.source === "candle-history" ? (
+        <div role="status" className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2.5 text-xs leading-5 text-amber-100">
+          <span className="font-semibold">احتياط تحليلي قائم على الشموع.</span> تعذر الوصول إلى TradingView MCP، لذا حُسبت مؤشرات السعر من تاريخ الشموع المتاح فقط. هذه القراءة لا تتضمن أدوات MCP أو تلاقيًا خارجيًا، وتبقى توصيتها محايدة.
+        </div>
+      ) : null}
 
       <BinanceOrderFlowContextCard symbol={params.symbol} exchange={params.exchange} />
 

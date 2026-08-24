@@ -162,6 +162,12 @@ export async function closeTradingViewMcpConnection() {
   if (activeConnection) await invalidateConnection(activeConnection);
 }
 
+/** يُستخدم لاختيار احتياط حقيقي عند غياب خدمة MCP، لا لإخفاء أخطاء المنطق أو التحقق. */
+export function isTradingViewMcpAvailabilityError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("TradingView MCP") && (message.includes("fetch failed") || message.includes("تجاوز مهلة") || message.includes("ECONNREFUSED"));
+}
+
 async function withMcpClient<T>(handler: (client: Client) => Promise<T>): Promise<T> {
   let lastCause: unknown;
 

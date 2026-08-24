@@ -5,6 +5,8 @@ export type LiveChartCandle = {
   low: number;
   close: number;
   volume: number;
+  observedAt?: number;
+  isClosed?: boolean;
 };
 
 const binanceIntervals: Record<string, string> = {
@@ -49,7 +51,17 @@ export function parseBinanceKlineMessage(payload: unknown): LiveChartCandle | nu
   const close = Number(row.c);
   const volume = Number(row.v);
   if (![timeMs, open, high, low, close, volume].every(Number.isFinite)) return null;
-  return { time: Math.floor(timeMs / 1000), open, high, low, close, volume };
+  const observedAt = Number((value as { E?: unknown }).E);
+  return {
+    time: Math.floor(timeMs / 1000),
+    open,
+    high,
+    low,
+    close,
+    volume,
+    ...(Number.isFinite(observedAt) ? { observedAt } : {}),
+    ...(typeof row.x === "boolean" ? { isClosed: row.x } : {}),
+  };
 }
 
 /** يحدّث الشمعة الجارية من البث، أو يضيفها عندما تبدأ فترة جديدة. */

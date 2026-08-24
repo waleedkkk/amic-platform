@@ -2,7 +2,8 @@ import { z } from "zod";
 import { getCandleHistoryCached, type CandleHistory, type CandleInterval } from "../candles";
 import { addUserWatchlistItem, getMarketSnapshot, getUserAnalysisExternalContextPreferences, getUserChartPreferences, getUserMarketPulsePreferences, listUserWatchlist, removeUserWatchlistItem, saveMarketSnapshot, saveUserAnalysisExternalContextPreferences, saveUserChartPreferences, saveUserMarketPulsePreferences } from "../db";
 import { createInFlightRequestCoalescer } from "../cacheCoalescing";
-import { callTradingViewTool, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
+import { callTradingViewTool, isTradingViewMcpAvailabilityError, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
+import { deriveTechnicalAnalysisFromCandles } from "../candleTechnicalFallback";
 import { getTwelveDataLiveQuote } from "../twelveDataStream";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences } from "../../shared/chartPreferences";
@@ -68,6 +69,25 @@ function intervalToRange(interval: CandleInterval): string {
   }
 }
 const toolName = z.enum(TRADINGVIEW_TOOL_NAMES);
+
+function technicalTimeframeToCandleInterval(value: z.infer<typeof timeframe>): CandleInterval {
+  if (value === "1D") return "1d";
+  if (value === "1W") return "1wk";
+  if (value === "1M") return "1mo";
+  if (value === "1h") return "60m";
+  return value;
+}
+
+async function fetchTechnicalAnalysisWithFallback(input: { symbol: string; exchange: string; timeframe: z.infer<typeof timeframe> }) {
+  try {
+    return normalizeTechnicalAnalysis(await callTradingViewTool("coin_analysis", input), input);
+  } catch (error) {
+    if (!isTradingViewMcpAvailabilityError(error)) throw error;
+    const interval = technicalTimeframeToCandleInterval(input.timeframe);
+    const history = await getCandleHistoryCached(input.symbol, input.exchange, interval, intervalToRange(interval), 250);
+    return deriveTechnicalAnalysisFromCandles(history, input);
+  }
+}
 
 function inferWatchlistAssetClass(symbol: string, exchange: string): "crypto" | "stock" | "forex" | "futures" {
   if (exchange === "BINANCE" || symbol.endsWith("USDT")) return "crypto";
@@ -259,7 +279,7 @@ export const marketRouter = router({
         input.exchange,
         input.timeframe,
         45,
-        async () => normalizeTechnicalAnalysis(await callTradingViewTool("coin_analysis", input), input),
+        () => fetchTechnicalAnalysisWithFallback(input),
       ),
     ),
 
