@@ -9,6 +9,7 @@ import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences, type ChartLayerPr
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
 import { getChartOverlayDensity } from "@/lib/chartOverlayDensity";
+import { selectMostRecentOverlays } from "@/lib/chartOverlaySelection";
 import { getChartFullscreenPortalContainer, isChartFullscreenTarget, requestChartFullscreen, type ChartFullscreenMode } from "@/lib/chartFullscreen";
 import { countEnabledIctLayers, ICT_LAYER_CONTROLS } from "@/lib/chartMobileControls";
 import { getFitContentKey } from "@/lib/chartViewport";
@@ -584,7 +585,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     decorationsRef.current = { levelLines: [], zoneLines: [], proposalLines: [], indicatorLines: [] };
 
     if (showLegacyLevels) {
-      decorationsRef.current.levelLines = structure.levels.slice(-overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
+      decorationsRef.current.levelLines = selectMostRecentOverlays(structure.levels, overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
         price: level.price,
         color: level.kind === "support" ? "rgba(22,163,74,0.46)" : "rgba(220,38,38,0.46)",
         lineWidth: 1,
@@ -612,7 +613,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     }
 
     if (showLegacyZones) {
-      decorationsRef.current.zoneLines = structure.zones.slice(-overlayDensity.zoneLimit).flatMap(zone => [
+      decorationsRef.current.zoneLines = selectMostRecentOverlays(structure.zones, overlayDensity.zoneLimit).flatMap(zone => [
         candlesSeries.createPriceLine({
           price: zone.high,
           color: zone.kind === "demand" ? "rgba(16,185,129,0.5)" : "rgba(251,113,133,0.5)",
@@ -651,7 +652,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       }
 
       if (showIctLiquidity) {
-        decorationsRef.current.levelLines.push(...confluenceResult.levels.slice(-overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
+        decorationsRef.current.levelLines.push(...selectMostRecentOverlays(confluenceResult.levels, overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
           price: level.price,
           color: level.kind === "sell-side-liquidity" ? "rgba(34,211,238,0.62)" : "rgba(232,121,249,0.62)",
           lineWidth: 1,
@@ -662,7 +663,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       }
 
       if (showIctZones) {
-        decorationsRef.current.zoneLines.push(...confluenceResult.zones.slice(-overlayDensity.zoneLimit).flatMap(zone => {
+        decorationsRef.current.zoneLines.push(...selectMostRecentOverlays(confluenceResult.zones, overlayDensity.zoneLimit).flatMap(zone => {
           const bullish = zone.direction === "bullish";
           const color = zone.kind.endsWith("fvg") ? (bullish ? "rgba(59,130,246,0.56)" : "rgba(168,85,247,0.56)") : (bullish ? "rgba(20,184,166,0.62)" : "rgba(239,68,68,0.62)");
           return [
@@ -673,7 +674,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       }
 
       if (showIctStructure || showIctSignals || showIctLiquidity) {
-        const maxEvents = overlayDensity.compact ? 8 : 20;
+        // تظل العلامات المختارة ثابتة عند تحريك المخطط أو تغيير عرضه؛
+        // الاختصار على الهاتف يخص تسميات المحور، لا بيانات الطبقات نفسها.
+        const maxEvents = 20;
         const eventMarkers: SeriesMarker<Time>[] = confluenceResult.events.slice(-maxEvents).filter(event => (event.kind.includes("sweep") ? showIctLiquidity : showIctStructure)).map(event => ({
           time: event.time as Time,
           position: event.direction === "bullish" ? "belowBar" : "aboveBar",

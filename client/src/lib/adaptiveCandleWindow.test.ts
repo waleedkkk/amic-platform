@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "./adaptiveCandleWindow";
 import { getChartOverlayDensity } from "./chartOverlayDensity";
+import { selectMostRecentOverlays } from "./chartOverlaySelection";
 
 describe("getAdaptiveCandleLimit", () => {
   it("يحافظ على حد أدنى يكفي للمؤشرات على الشاشات الضيقة", () => {
@@ -35,11 +36,11 @@ describe("getChartViewportHeight", () => {
 });
 
 describe("getChartOverlayDensity", () => {
-  it("يحد تسميات السعر الكثيفة على شاشة الهاتف مع إبقاء خطوط المستويات مرئية", () => {
+  it("يخفي تسميات المحور الكثيفة على شاشة الهاتف من دون تقليص طبقات المستخدم", () => {
     expect(getChartOverlayDensity(320)).toEqual({
       compact: true,
-      levelLimit: 2,
-      zoneLimit: 2,
+      levelLimit: 6,
+      zoneLimit: 4,
       showZoneAxisLabels: false,
       showProposalAxisLabels: false,
     });
@@ -53,5 +54,19 @@ describe("getChartOverlayDensity", () => {
       showZoneAxisLabels: true,
       showProposalAxisLabels: true,
     });
+  });
+
+  it("يثبت الطبقات المختارة عند التكبير والتصغير الشديدين مع تغيير حد الشموع فقط", () => {
+    const overlays = Array.from({ length: 8 }, (_, index) => ({ id: `overlay-${index + 1}`, createdAt: index + 1 }));
+    const widths = [160, 320, 559, 560, 768, 1440, 3_200];
+    const baseline = selectMostRecentOverlays(overlays, getChartOverlayDensity(widths[0]).levelLimit).map(item => item.id);
+
+    for (const width of widths) {
+      const density = getChartOverlayDensity(width);
+      expect(selectMostRecentOverlays(overlays, density.levelLimit).map(item => item.id)).toEqual(baseline);
+      expect(density.levelLimit).toBe(6);
+      expect(density.zoneLimit).toBe(4);
+      expect(getAdaptiveCandleLimit(width)).toBeGreaterThanOrEqual(180);
+    }
   });
 });
