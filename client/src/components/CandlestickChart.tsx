@@ -19,7 +19,7 @@ import type { RiskLevelSource } from "@/lib/paperTradeDraft";
 import { StructureInsightPanel } from "@/components/StructureInsightPanel";
 import { describeCandleDataStatus, getMarketAssetProfile } from "@shared/marketAssetProfile";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { calculateConfluenceIct, type ConfluenceIctSettings } from "@shared/confluenceIct";
+import { calculateConfluenceIct, ICT_MAX_SCORE, type ConfluenceIctSettings } from "@shared/confluenceIct";
 import { Maximize2, Minimize2, Radio, SlidersHorizontal } from "lucide-react";
 import {
   CandlestickSeries,
@@ -850,6 +850,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <label className="grid gap-1.5"><span className="text-muted-foreground">Liquidity tolerance %</span><input type="number" min="0.01" step="0.01" value={preferences.confluenceIct.settings.liquidityTolerancePercent} onChange={event => updateConfluenceSetting("liquidityTolerancePercent", Number(event.target.value))} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground" /></label>
             <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.requireSweep} onChange={event => updateConfluenceSetting("requireSweep", event.target.checked)} /><span>اشتراط Sweep</span></label>
             <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.requireFvg} onChange={event => updateConfluenceSetting("requireFvg", event.target.checked)} /><span>اشتراط FVG</span></label>
+            <label className="flex min-h-9 items-center gap-2 rounded-md border border-white/[0.08] bg-black/20 px-2"><input type="checkbox" checked={preferences.confluenceIct.settings.ictConfirmMode} onChange={event => updateConfluenceSetting("ictConfirmMode", event.target.checked)} disabled={preferences.confluenceIct.settings.mode === "scalping"} /><span>اشتراط تأكيد ICT بالوضع الطبيعي</span></label>
+            <label className="grid gap-1.5"><span className="text-muted-foreground">حد تأكيد ICT</span><input type="number" min="1" max={ICT_MAX_SCORE} value={preferences.confluenceIct.settings.ictConfirmThreshold} onChange={event => updateConfluenceSetting("ictConfirmThreshold", Number(event.target.value))} disabled={preferences.confluenceIct.settings.mode === "scalping" || !preferences.confluenceIct.settings.ictConfirmMode} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground disabled:opacity-45" /></label>
           </div>
         ) : null}
         <div className={`relative overflow-hidden rounded-xl ${isChartFullscreen ? "min-h-0 flex-1" : "h-[340px] min-h-[260px] sm:h-[440px] lg:h-[520px]"}`}>
@@ -894,10 +896,11 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         </div>
         </div>
         {showIctSummary ? (
-          <div className="mt-3 grid gap-2 rounded-xl border border-primary/20 bg-primary/[0.05] p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-3 grid gap-2 rounded-xl border border-primary/20 bg-primary/[0.05] p-3 text-xs sm:grid-cols-2 lg:grid-cols-5">
             <div><p className="text-muted-foreground">اتجاه ICT</p><p className={`mt-1 font-semibold ${confluenceResult.summary.trend === "bullish" ? "text-emerald-300" : confluenceResult.summary.trend === "bearish" ? "text-rose-300" : "text-muted-foreground"}`}>{confluenceResult.summary.trend === "bullish" ? "صاعد" : confluenceResult.summary.trend === "bearish" ? "هابط" : "محايد"}</p></div>
             <div><p className="text-muted-foreground">Confluence</p><p className="mt-1 font-mono">شراء {confluenceResult.summary.confluence.bull}/{confluenceResult.summary.confluence.max} · بيع {confluenceResult.summary.confluence.bear}/{confluenceResult.summary.confluence.max}</p></div>
-            <div><p className="text-muted-foreground">ICT Score</p><p className="mt-1 font-mono text-primary">Bull {confluenceResult.summary.ict.bull}/10 · Bear {confluenceResult.summary.ict.bear}/10</p></div>
+            <div><p className="text-muted-foreground">ICT Score</p><p className="mt-1 font-mono text-primary">Bull {confluenceResult.summary.ict.bull}/{confluenceResult.summary.ict.max} · Bear {confluenceResult.summary.ict.bear}/{confluenceResult.summary.ict.max}</p></div>
+            <div><p className="text-muted-foreground">بوابة تأكيد ICT</p><p className={`mt-1 font-semibold ${confluenceResult.summary.mode === "scalping" ? "text-muted-foreground" : !confluenceResult.summary.ict.confirmation.enabled ? "text-sky-300" : confluenceResult.summary.decision.blockedByIct ? "text-rose-300" : confluenceResult.summary.ict.confirmation.bullConfirmed || confluenceResult.summary.ict.confirmation.bearConfirmed ? "text-emerald-300" : "text-amber-300"}`}>{confluenceResult.summary.mode === "scalping" ? "Scalping فقط" : !confluenceResult.summary.ict.confirmation.enabled ? "معطلة · السلوك السابق" : confluenceResult.summary.decision.blockedByIct ? `رُفض ${confluenceResult.summary.decision.blockedByIct} · الحد ${confluenceResult.summary.ict.confirmation.threshold}` : `شراء ${confluenceResult.summary.ict.confirmation.bullConfirmed ? "✓" : "✕"} · بيع ${confluenceResult.summary.ict.confirmation.bearConfirmed ? "✓" : "✕"} · الحد ${confluenceResult.summary.ict.confirmation.threshold}`}</p></div>
             <div><p className="text-muted-foreground">الحالة</p><p className={`mt-1 font-semibold ${confluenceResult.summary.signal === "BUY" ? "text-emerald-300" : confluenceResult.summary.signal === "SELL" ? "text-rose-300" : "text-muted-foreground"}`}>{confluenceResult.summary.signal} {confluenceResult.summary.reasons.length ? `· ${confluenceResult.summary.reasons.join(" + ")}` : "· انتظار اكتمال التلاقي"}</p></div>
           </div>
         ) : null}

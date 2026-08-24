@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHART_INDICATOR_REGISTRY, calculateConfluenceIct, type IndicatorCandle } from "./confluenceIct";
+import { CHART_INDICATOR_REGISTRY, calculateConfluenceIct, calculateIctScores, ICT_MAX_SCORE, resolveIctConfirmation, resolveIctSignal, type IndicatorCandle } from "./confluenceIct";
 
 function candle(time: number, open: number, high: number, low: number, close: number): IndicatorCandle {
   return { time, open, high, low, close, volume: 100 };
@@ -38,5 +38,24 @@ describe("Confluence ICT V3.4", () => {
     expect(result.id).toBe("confluence-ict-v3-4");
     expect(result.lines).toHaveLength(3);
     expect(result.summary.signal).toBe("WAIT");
+  });
+
+  it("يحسب درجة ICT القصوى الفعلية مع مكوّن Order Block", () => {
+    const scores = calculateIctScores({ trendDirection: 1, bullStructure: true, bearStructure: false, bullSweep: true, bearSweep: false, strongestBullFvg: 4, strongestBearFvg: 0, momentumBull: true, momentumBear: false, bullOrderBlock: true, bearOrderBlock: false });
+    expect(scores.bull).toBe(ICT_MAX_SCORE);
+    expect(scores.max).toBe(10);
+  });
+
+  it("يمنع إشارة الوضع الطبيعي عند إخفاق بوابة ICT ويعيد السلوك الأساسي عند تعطيلها", () => {
+    const blockingGate = resolveIctConfirmation(true, 5, { bull: 4, bear: 0 });
+    expect(resolveIctSignal({ mode: "normal", strongBuyBase: true, strongSellBase: false, scalpBullSetup: true, scalpBearSetup: false, gate: blockingGate })).toMatchObject({ strongBuy: false, blockedByIct: "BUY" });
+
+    const disabledGate = resolveIctConfirmation(false, 5, { bull: 0, bear: 0 });
+    expect(resolveIctSignal({ mode: "normal", strongBuyBase: true, strongSellBase: false, scalpBullSetup: false, scalpBearSetup: false, gate: disabledGate })).toMatchObject({ strongBuy: true, blockedByIct: null });
+  });
+
+  it("يحافظ على بوابة Scalping دون تطبيق بوابة ICT عليها", () => {
+    const blockingGate = resolveIctConfirmation(true, 5, { bull: 0, bear: 0 });
+    expect(resolveIctSignal({ mode: "scalping", strongBuyBase: true, strongSellBase: false, scalpBullSetup: true, scalpBearSetup: false, gate: blockingGate })).toMatchObject({ strongBuy: true, blockedByIct: null });
   });
 });

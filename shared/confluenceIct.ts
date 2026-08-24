@@ -59,9 +59,15 @@ export type IndicatorSummary = {
   preset: "conservative" | "balanced" | "aggressive";
   trend: "bullish" | "bearish" | "neutral";
   confluence: { bull: number; bear: number; net: number; max: number };
-  ict: { bull: number; bear: number; max: number };
+  ict: {
+    bull: number;
+    bear: number;
+    max: number;
+    confirmation: IctConfirmationGate;
+  };
   scalp: { bull: number; bear: number; threshold: number; max: number };
   signal: "BUY" | "SELL" | "WAIT";
+  decision: { baseSignal: "BUY" | "SELL" | "WAIT"; blockedByIct: "BUY" | "SELL" | null };
   reasons: string[];
 };
 
@@ -120,7 +126,20 @@ export type ConfluenceIctSettings = {
   liquidityTolerancePercent: number;
   useStructureInScore: boolean;
   strongOnly: boolean;
+  ictConfirmMode: boolean;
+  ictConfirmThreshold: number;
 };
+
+export const ICT_SCORE_WEIGHTS = {
+  structure: 2,
+  break: 1,
+  sweep: 2,
+  fvg: 2,
+  momentum: 1,
+  orderBlock: 2,
+} as const;
+
+export const ICT_MAX_SCORE = Object.values(ICT_SCORE_WEIGHTS).reduce((sum, weight) => sum + weight, 0);
 
 export const DEFAULT_CONFLUENCE_ICT_SETTINGS: ConfluenceIctSettings = {
   mode: "normal",
@@ -156,6 +175,8 @@ export const DEFAULT_CONFLUENCE_ICT_SETTINGS: ConfluenceIctSettings = {
   liquidityTolerancePercent: 0.1,
   useStructureInScore: true,
   strongOnly: true,
+  ictConfirmMode: true,
+  ictConfirmThreshold: 5,
 };
 
 type ResolvedSettings = ConfluenceIctSettings & {
@@ -176,6 +197,71 @@ type ResolvedSettings = ConfluenceIctSettings & {
 
 type ActiveZone = IndicatorZone & { startIndex: number };
 
+export type IctScoreEvidence = {
+  trendDirection: -1 | 0 | 1;
+  bullStructure: boolean;
+  bearStructure: boolean;
+  bullSweep: boolean;
+  bearSweep: boolean;
+  strongestBullFvg: number;
+  strongestBearFvg: number;
+  momentumBull: boolean;
+  momentumBear: boolean;
+  bullOrderBlock: boolean;
+  bearOrderBlock: boolean;
+};
+
+export type IctConfirmationGate = {
+  enabled: boolean;
+  threshold: number;
+  bullConfirmed: boolean;
+  bearConfirmed: boolean;
+};
+
+export function calculateIctScores(evidence: IctScoreEvidence): { bull: number; bear: number; max: number } {
+  const bull =
+    (evidence.trendDirection === 1 ? ICT_SCORE_WEIGHTS.structure : 0) +
+    (evidence.bullStructure ? ICT_SCORE_WEIGHTS.break : 0) +
+    (evidence.bullSweep ? ICT_SCORE_WEIGHTS.sweep : 0) +
+    (evidence.strongestBullFvg >= 4 ? ICT_SCORE_WEIGHTS.fvg : 0) +
+    (evidence.momentumBull ? ICT_SCORE_WEIGHTS.momentum : 0) +
+    (evidence.bullOrderBlock ? ICT_SCORE_WEIGHTS.orderBlock : 0);
+  const bear =
+    (evidence.trendDirection === -1 ? ICT_SCORE_WEIGHTS.structure : 0) +
+    (evidence.bearStructure ? ICT_SCORE_WEIGHTS.break : 0) +
+    (evidence.bearSweep ? ICT_SCORE_WEIGHTS.sweep : 0) +
+    (evidence.strongestBearFvg >= 4 ? ICT_SCORE_WEIGHTS.fvg : 0) +
+    (evidence.momentumBear ? ICT_SCORE_WEIGHTS.momentum : 0) +
+    (evidence.bearOrderBlock ? ICT_SCORE_WEIGHTS.orderBlock : 0);
+  return { bull, bear, max: ICT_MAX_SCORE };
+}
+
+export function resolveIctConfirmation(enabled: boolean, threshold: number, scores: Pick<IndicatorSummary["ict"], "bull" | "bear">): IctConfirmationGate {
+  const normalizedThreshold = Math.min(ICT_MAX_SCORE, Math.max(1, Math.floor(threshold)));
+  return {
+    enabled,
+    threshold: normalizedThreshold,
+    bullConfirmed: !enabled || scores.bull >= normalizedThreshold,
+    bearConfirmed: !enabled || scores.bear >= normalizedThreshold,
+  };
+}
+
+export function resolveIctSignal(input: {
+  mode: ConfluenceIctSettings["mode"];
+  strongBuyBase: boolean;
+  strongSellBase: boolean;
+  scalpBullSetup: boolean;
+  scalpBearSetup: boolean;
+  gate: IctConfirmationGate;
+}): { strongBuy: boolean; strongSell: boolean; baseSignal: "BUY" | "SELL" | "WAIT"; blockedByIct: "BUY" | "SELL" | null } {
+  const baseSignal = input.strongBuyBase ? "BUY" : input.strongSellBase ? "SELL" : "WAIT";
+  if (input.mode === "scalping") {
+    return { strongBuy: input.strongBuyBase && input.scalpBullSetup, strongSell: input.strongSellBase && input.scalpBearSetup, baseSignal, blockedByIct: null };
+  }
+  const blockedByIct = input.strongBuyBase && !input.gate.bullConfirmed ? "BUY" : input.strongSellBase && !input.gate.bearConfirmed ? "SELL" : null;
+  return { strongBuy: input.strongBuyBase && input.gate.bullConfirmed, strongSell: input.strongSellBase && input.gate.bearConfirmed, baseSignal, blockedByIct };
+}
+
 function positiveInteger(value: number, fallback: number, min = 1): number {
   return Number.isFinite(value) ? Math.max(min, Math.floor(value)) : fallback;
 }
@@ -188,6 +274,7 @@ function resolveSettings(input?: Partial<ConfluenceIctSettings>): ResolvedSettin
   return {
     ...settings,
     contextBars: positiveInteger(settings.contextBars, 12, 2),
+    ictConfirmThreshold: Math.min(ICT_MAX_SCORE, positiveInteger(settings.ictConfirmThreshold, DEFAULT_CONFLUENCE_ICT_SETTINGS.ictConfirmThreshold)),
     emaFastEffective: pick(settings.emaFast, 20, 13, 9),
     emaMidEffective: pick(settings.emaMid, 50, 34, 21),
     emaSlowEffective: pick(settings.emaSlow, 200, 100, 50),
@@ -343,7 +430,7 @@ function trimZones(zones: ActiveZone[], kind: ActiveZone["kind"], maximum: numbe
 /** يعيد تنفيذ منطق Confluence ICT V3.4 على شموع AMIC من دون تشغيل Pine في المتصفح. */
 export function calculateConfluenceIct(candles: IndicatorCandle[], input?: Partial<ConfluenceIctSettings>): ChartIndicatorResult {
   const settings = resolveSettings(input);
-  const emptySummary: IndicatorSummary = { mode: settings.mode, preset: settings.preset, trend: "neutral", confluence: { bull: 0, bear: 0, net: 0, max: settings.useStructureInScore ? 7 : 6 }, ict: { bull: 0, bear: 0, max: 10 }, scalp: { bull: 0, bear: 0, threshold: 0, max: 0 }, signal: "WAIT", reasons: [] };
+  const emptySummary: IndicatorSummary = { mode: settings.mode, preset: settings.preset, trend: "neutral", confluence: { bull: 0, bear: 0, net: 0, max: settings.useStructureInScore ? 7 : 6 }, ict: { bull: 0, bear: 0, max: ICT_MAX_SCORE, confirmation: resolveIctConfirmation(settings.ictConfirmMode, settings.ictConfirmThreshold, { bull: 0, bear: 0 }) }, scalp: { bull: 0, bear: 0, threshold: 0, max: 0 }, signal: "WAIT", decision: { baseSignal: "WAIT", blockedByIct: null }, reasons: [] };
   if (!candles.length) return { id: "confluence-ict-v3-4", lines: [], zones: [], levels: [], events: [], signals: [], summary: emptySummary, breakdown: [] };
 
   const closes = candles.map(candle => candle.close);
@@ -518,9 +605,12 @@ export function calculateConfluenceIct(candles: IndicatorCandle[], input?: Parti
     const sellThreshold = -buyThreshold;
     const strongBuyBase = bullScore - bearScore >= buyThreshold && (settings.mode === "scalping" ? momentumBull : !overbought);
     const strongSellBase = bullScore - bearScore <= sellThreshold && (settings.mode === "scalping" ? momentumBear : !oversold);
-    const strongBuy = settings.mode === "scalping" ? strongBuyBase && scalpBull >= scalpThreshold : strongBuyBase;
-    const strongSell = settings.mode === "scalping" ? strongSellBase && scalpBear >= scalpThreshold : strongSellBase;
-    const reasons = [trendUp ? "EMA" : trendDown ? "EMA" : "", rsiBull || rsiBear ? "RSI" : "", macdBull || macdBear ? "MACD" : "", stochasticBull || stochasticBear ? "Stochastic" : "", adxBull || adxBear ? "ADX" : "", obvBull || obvBear ? "OBV" : "", trendDirection !== 0 ? "Structure" : "", bullSweep || bearSweep ? "Sweep" : "", bullFvgRetest || bearFvgRetest ? "FVG" : "", bullObContext || bearObContext ? "OB" : ""].filter(Boolean);
+    const ictScores = calculateIctScores({ trendDirection, bullStructure, bearStructure, bullSweep, bearSweep, strongestBullFvg, strongestBearFvg, momentumBull: macdBull && rsiBull, momentumBear: macdBear && rsiBear, bullOrderBlock: bullObContext, bearOrderBlock: bearObContext });
+    const ictGate = resolveIctConfirmation(settings.ictConfirmMode, settings.ictConfirmThreshold, ictScores);
+    const decision = resolveIctSignal({ mode: settings.mode, strongBuyBase, strongSellBase, scalpBullSetup: scalpBull >= scalpThreshold, scalpBearSetup: scalpBear >= scalpThreshold, gate: ictGate });
+    const strongBuy = decision.strongBuy;
+    const strongSell = decision.strongSell;
+    const reasons = [trendUp ? "EMA" : trendDown ? "EMA" : "", rsiBull || rsiBear ? "RSI" : "", macdBull || macdBear ? "MACD" : "", stochasticBull || stochasticBear ? "Stochastic" : "", adxBull || adxBear ? "ADX" : "", obvBull || obvBear ? "OBV" : "", trendDirection !== 0 ? "Structure" : "", bullSweep || bearSweep ? "Sweep" : "", bullFvgRetest || bearFvgRetest ? "FVG" : "", bullObContext || bearObContext ? "OB" : "", decision.blockedByIct === "BUY" ? `بوابة ICT: شراء ${ictScores.bull}/${ictScores.max} أقل من ${ictGate.threshold}` : "", decision.blockedByIct === "SELL" ? `بوابة ICT: بيع ${ictScores.bear}/${ictScores.max} أقل من ${ictGate.threshold}` : ""].filter(Boolean);
     if (strongBuy && !previousStrongBuy) signals.push({ id: `buy-${candle.time}`, direction: "bullish", time: candle.time, price: candle.close, label: "BUY", score: settings.mode === "scalping" ? scalpBull : bullScore - bearScore, maxScore: settings.mode === "scalping" ? scalpMax : maxScore, reasons });
     if (strongSell && !previousStrongSell) signals.push({ id: `sell-${candle.time}`, direction: "bearish", time: candle.time, price: candle.close, label: "SELL", score: settings.mode === "scalping" ? scalpBear : bearScore - bullScore, maxScore: settings.mode === "scalping" ? scalpMax : maxScore, reasons });
     previousStrongBuy = strongBuy;
@@ -553,9 +643,10 @@ export function calculateConfluenceIct(candles: IndicatorCandle[], input?: Parti
       preset: settings.preset,
       trend: trendDirection === 1 ? "bullish" : trendDirection === -1 ? "bearish" : "neutral",
       confluence: { bull: bullScore, bear: bearScore, net: bullScore - bearScore, max: maxScore },
-      ict: { bull: (trendDirection === 1 ? 2 : 0) + (bullStructure ? 1 : 0) + (bullSweep ? 2 : 0) + (strongestBullFvg >= 4 ? 2 : 0) + (macdBull && rsiBull ? 1 : 0), bear: (trendDirection === -1 ? 2 : 0) + (bearStructure ? 1 : 0) + (bearSweep ? 2 : 0) + (strongestBearFvg >= 4 ? 2 : 0) + (macdBear && rsiBear ? 1 : 0), max: 10 },
+      ict: { ...ictScores, confirmation: ictGate },
       scalp: { bull: scalpBull, bear: scalpBear, threshold: scalpThreshold, max: scalpMax },
       signal: strongBuy ? "BUY" : strongSell ? "SELL" : "WAIT",
+      decision: { baseSignal: decision.baseSignal, blockedByIct: decision.blockedByIct },
       reasons,
     };
   }
