@@ -1,3 +1,5 @@
+import type { OrderFlowPreferences } from "../../../shared/orderFlowPreferences";
+
 export const BINANCE_ORDER_FLOW_SYMBOLS = [
   "BTCUSDT",
   "ETHUSDT",
@@ -12,10 +14,11 @@ export const BINANCE_ORDER_FLOW_SYMBOLS = [
 ] as const;
 
 export const MAX_LOCAL_ORDER_FLOW_SYMBOLS = 5;
+export const MAX_CVD_DISPLAY_POINTS = 180;
 const CVD_WINDOW_MS = 5 * 60 * 1_000;
+const CVD_BUCKET_MS = 1_000;
 const LARGE_TRADE_SAMPLE = 20;
 const LARGE_TRADE_MULTIPLIER = 4;
-const MIN_LARGE_TRADE_NOTIONAL = 5_000;
 
 export type BinanceOrderFlowStatus = "connecting" | "live" | "closed" | "error" | "unsupported";
 export type BinanceOrderFlowEvent = {
@@ -25,6 +28,16 @@ export type BinanceOrderFlowEvent = {
   price: number;
   notional: number;
   observedAt: number;
+};
+
+export type BinanceCvdPoint = {
+  time: number;
+  delta: number;
+  cvd: number;
+  buyVolume: number;
+  sellVolume: number;
+  largeTradeCount: number;
+  depthImbalance: number | null;
 };
 
 export type BinanceOrderFlowSnapshot = {
@@ -37,6 +50,7 @@ export type BinanceOrderFlowSnapshot = {
   askLiquidity: number | null;
   depthImbalance: number | null;
   cvdApprox: number;
+  cvdSeries: BinanceCvdPoint[];
   events: BinanceOrderFlowEvent[];
   depthLevels: number;
   error: string | null;
@@ -45,8 +59,9 @@ export type BinanceOrderFlowSnapshot = {
 export type BinanceTradePayload = { p: string; q: string; m: boolean; t: number; T: number };
 export type BinanceDepthPayload = { bids: Array<[string, string]>; asks: Array<[string, string]>; E?: number };
 
+type MutableCvdBucket = Omit<BinanceCvdPoint, "time" | "cvd">;
 type MutableState = BinanceOrderFlowSnapshot & {
-  cvdBuckets: Map<number, number>;
+  cvdBuckets: Map<number, MutableCvdBucket>;
   recentNotionals: number[];
 };
 
@@ -75,6 +90,7 @@ function initialState(symbol: string): MutableState {
     askLiquidity: null,
     depthImbalance: null,
     cvdApprox: 0,
+    cvdSeries: [],
     events: [],
     depthLevels: 0,
     error: null,
@@ -85,13 +101,47 @@ function initialState(symbol: string): MutableState {
 
 function publicSnapshot(state: MutableState): BinanceOrderFlowSnapshot {
   const { cvdBuckets: _cvdBuckets, recentNotionals: _recentNotionals, ...snapshot } = state;
-  return { ...snapshot, events: [...snapshot.events] };
+  return { ...snapshot, events: snapshot.events.map(event => ({ ...event })), cvdSeries: snapshot.cvdSeries.map(point => ({ ...point })) };
+}
+
+function downsample(points: BinanceCvdPoint[]) {
+  if (points.length <= MAX_CVD_DISPLAY_POINTS) return points;
+  const sampled: BinanceCvdPoint[] = [];
+  const stride = (points.length - 1) / (MAX_CVD_DISPLAY_POINTS - 1);
+  for (let index = 0; index < MAX_CVD_DISPLAY_POINTS; index += 1) sampled.push(points[Math.round(index * stride)]);
+  return sampled;
+}
+
+function rebuildCvdSeries(state: MutableState, observedAt: number) {
+  const oldestAllowed = observedAt - CVD_WINDOW_MS;
+  Array.from(state.cvdBuckets.keys()).forEach(timestamp => {
+    if (timestamp < oldestAllowed) state.cvdBuckets.delete(timestamp);
+  });
+  let cumulative = 0;
+  const points = Array.from(state.cvdBuckets.entries())
+    .sort(([left], [right]) => left - right)
+    .map(([timestamp, bucket]) => {
+      cumulative += bucket.delta;
+      return {
+        time: Math.floor(timestamp / 1_000),
+        delta: bucket.delta,
+        cvd: cumulative,
+        buyVolume: bucket.buyVolume,
+        sellVolume: bucket.sellVolume,
+        largeTradeCount: bucket.largeTradeCount,
+        depthImbalance: bucket.depthImbalance,
+      };
+    });
+  state.cvdSeries = downsample(points);
+  state.cvdApprox = cumulative;
 }
 
 export class BinanceOrderFlowEngine {
   private states = new Map<string, MutableState>();
+  private preferences: OrderFlowPreferences;
 
-  constructor(symbols: string[]) {
+  constructor(symbols: string[], preferences: OrderFlowPreferences) {
+    this.preferences = preferences;
     normalizeBinanceOrderFlowSymbols(symbols).forEach(symbol => this.states.set(symbol, initialState(symbol)));
   }
 
@@ -105,13 +155,13 @@ export class BinanceOrderFlowEngine {
   applyDepth(symbol: string, payload: BinanceDepthPayload, observedAt = Date.now()) {
     const state = this.states.get(symbol);
     if (!state) return;
-    const bidLiquidity = payload.bids.slice(0, 20).reduce((total, [, quantity]) => total + finite(quantity), 0);
-    const askLiquidity = payload.asks.slice(0, 20).reduce((total, [, quantity]) => total + finite(quantity), 0);
+    const bidLiquidity = payload.bids.slice(0, this.preferences.depthLevels).reduce((total, [, quantity]) => total + finite(quantity), 0);
+    const askLiquidity = payload.asks.slice(0, this.preferences.depthLevels).reduce((total, [, quantity]) => total + finite(quantity), 0);
     const total = bidLiquidity + askLiquidity;
     state.bidLiquidity = bidLiquidity;
     state.askLiquidity = askLiquidity;
     state.depthImbalance = total > 0 ? (bidLiquidity - askLiquidity) / total : null;
-    state.depthLevels = Math.min(payload.bids.length, 20) + Math.min(payload.asks.length, 20);
+    state.depthLevels = Math.min(payload.bids.length, this.preferences.depthLevels) + Math.min(payload.asks.length, this.preferences.depthLevels);
     state.depthUpdatedAt = observedAt;
     state.updatedAt = observedAt;
     state.status = "live";
@@ -126,16 +176,10 @@ export class BinanceOrderFlowEngine {
     const quantity = finite(payload.q);
     const notional = price * quantity;
     const signedVolume = payload.m ? -quantity : quantity;
-    const bucket = Math.floor(observedAt / 1_000) * 1_000;
-    state.cvdBuckets.set(bucket, (state.cvdBuckets.get(bucket) ?? 0) + signedVolume);
-    Array.from(state.cvdBuckets.keys()).forEach(timestamp => {
-      if (timestamp < observedAt - CVD_WINDOW_MS) state.cvdBuckets.delete(timestamp);
-    });
-    state.cvdApprox = Array.from(state.cvdBuckets.values()).reduce((total, value) => total + value, 0);
-
     const sample = state.recentNotionals.slice(-LARGE_TRADE_SAMPLE);
     const baseline = sample.length ? sample.reduce((total, value) => total + value, 0) / sample.length : null;
-    if (baseline !== null && notional >= MIN_LARGE_TRADE_NOTIONAL && notional >= baseline * LARGE_TRADE_MULTIPLIER) {
+    const isLarge = baseline !== null && notional >= this.preferences.largeTradeMinNotional && notional >= baseline * LARGE_TRADE_MULTIPLIER;
+    if (isLarge) {
       const event: BinanceOrderFlowEvent = {
         id: `${payload.t}-${observedAt}`,
         kind: "large_trade",
@@ -146,6 +190,21 @@ export class BinanceOrderFlowEngine {
       };
       state.events = [event, ...state.events].slice(0, 3);
     }
+    const bucketTime = Math.floor(observedAt / CVD_BUCKET_MS) * CVD_BUCKET_MS;
+    const bucket = state.cvdBuckets.get(bucketTime) ?? {
+      delta: 0,
+      buyVolume: 0,
+      sellVolume: 0,
+      largeTradeCount: 0,
+      depthImbalance: state.depthImbalance,
+    };
+    bucket.delta += signedVolume;
+    if (signedVolume > 0) bucket.buyVolume += quantity;
+    else bucket.sellVolume += quantity;
+    if (isLarge) bucket.largeTradeCount += 1;
+    bucket.depthImbalance = state.depthImbalance;
+    state.cvdBuckets.set(bucketTime, bucket);
+    rebuildCvdSeries(state, observedAt);
     state.recentNotionals = [...sample, notional].slice(-LARGE_TRADE_SAMPLE);
     state.tradeUpdatedAt = observedAt;
     state.updatedAt = observedAt;

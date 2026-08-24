@@ -22,6 +22,7 @@ import { economicCalendarRouter } from "./routers/economicCalendar";
 import { marketRouter } from "./routers/market";
 import { metalAlertsRouter } from "./routers/metalAlerts";
 import { paperTradingRouter } from "./routers/paperTrading";
+import { orderFlowPreferencesRouter } from "./routers/orderFlowPreferences";
 import { signalsRouter } from "./routers/signals";
 import { structureAlertsRouter } from "./routers/structureAlerts";
 import { structureContextAlertsRouter } from "./routers/structureContextAlerts";
@@ -81,6 +82,7 @@ export const appRouter = router({
   }),
   alertCenter: alertCenterRouter,
   market: marketRouter,
+  orderFlow: orderFlowPreferencesRouter,
   economicCalendar: economicCalendarRouter,
   metalAlerts: metalAlertsRouter,
   structureAlerts: structureAlertsRouter,

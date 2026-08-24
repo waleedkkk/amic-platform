@@ -18,6 +18,7 @@ import {
   marketSnapshots,
   metalAlertMonitorSettings,
   metalAlerts,
+  orderFlowPreferences,
   structureAlerts,
   structureContextAlerts,
   paperTrades,
@@ -550,6 +551,19 @@ export async function saveUserChartPreferences(userId: number, preferences: Reco
   const db = await requireDb();
   await db.insert(chartPreferences).values({ userId, layers: preferences }).onDuplicateKeyUpdate({ set: { layers: preferences, updatedAt: new Date() } });
   return { layers: preferences };
+}
+
+export async function getUserOrderFlowPreferences(userId: number) {
+  const db = await requireDb();
+  const [preferences] = await db.select().from(orderFlowPreferences).where(eq(orderFlowPreferences.userId, userId)).limit(1);
+  return preferences;
+}
+
+export async function saveUserOrderFlowPreferences(userId: number, preferences: { largeTradeMinNotional: number; depthLevels: number }) {
+  const db = await requireDb();
+  await db.insert(orderFlowPreferences).values({ userId, ...preferences }).onDuplicateKeyUpdate({
+    set: { ...preferences, updatedAt: new Date() },
+  });
 }
 
 export async function getUserMarketPulsePreferences(userId: number) {

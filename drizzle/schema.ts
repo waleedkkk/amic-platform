@@ -273,6 +273,13 @@ export const chartPreferences = mysqlTable("chartPreferences", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const orderFlowPreferences = mysqlTable("orderFlowPreferences", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  largeTradeMinNotional: int("largeTradeMinNotional").notNull().default(5000),
+  depthLevels: int("depthLevels").notNull().default(20),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const marketPulsePreferences = mysqlTable("marketPulsePreferences", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   sections: json("sections").$type<string[]>().notNull(),
@@ -347,6 +354,7 @@ export type StructureAlert = typeof structureAlerts.$inferSelect;
 export type StructureContextAlert = typeof structureContextAlerts.$inferSelect;
 export type UserNotification = typeof userNotifications.$inferSelect;
 export type ChartPreferences = typeof chartPreferences.$inferSelect;
+export type OrderFlowPreferences = typeof orderFlowPreferences.$inferSelect;
 export type MarketPulsePreferences = typeof marketPulsePreferences.$inferSelect;
 export type AnalysisExternalContextPreferences = typeof analysisExternalContextPreferences.$inferSelect;
 export type EconomicCalendarSubscription = typeof economicCalendarSubscriptions.$inferSelect;
