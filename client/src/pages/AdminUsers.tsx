@@ -1,10 +1,14 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable, LoadState, Panel, PageHeading, formatValue } from "@/components/market-ui";
 import { AdminAiProviderSettings } from "@/components/AdminAiProviderSettings";
+import { AdminOperationsDashboard } from "@/components/AdminOperationsDashboard";
 import { trpc } from "@/lib/trpc";
-import { Bot, Clock3, ShieldCheck } from "lucide-react";
+import { Bot, Clock3, Search, ShieldCheck, UsersRound } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useMemo, useState } from "react";
 
 export default function AdminUsers() {
   const { user } = useAuth();
@@ -12,14 +16,27 @@ export default function AdminUsers() {
     enabled: user?.role === "admin",
   });
   const registerCleanup = trpc.auth.admin.heartbeat.registerMarketSnapshotCleanup.useMutation();
+  const [userSearch, setUserSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "user">("all");
 
-  const rows =
-    data?.map(row => ({
-      ...row,
-      role: row.role === "admin" ? "مسؤول" : "مستخدم",
-      lastSignedIn: row.lastSignedIn ? new Date(row.lastSignedIn).toLocaleString("ar", { dateStyle: "medium", timeStyle: "short" }) : "لم يسجّل الدخول بعد",
-      loginMethod: row.loginMethod === "password" ? "بريد وكلمة مرور" : (row.loginMethod ?? "—"),
-    })) ?? [];
+  const rows = useMemo(() => {
+    const search = userSearch.trim().toLowerCase();
+    return (data ?? [])
+      .filter(row => roleFilter === "all" || row.role === roleFilter)
+      .filter(row => !search || `${row.name ?? ""} ${row.email ?? ""}`.toLowerCase().includes(search))
+      .map(row => {
+        const lastSignedIn = row.lastSignedIn ? new Date(row.lastSignedIn) : null;
+        const activeRecently = Boolean(lastSignedIn && lastSignedIn.getTime() > Date.now() - 7 * 24 * 60 * 60 * 1_000);
+        return {
+          المستخدم: row.name ?? "—",
+          البريد: row.email ?? "—",
+          الصلاحية: row.role === "admin" ? "مسؤول" : "مستخدم",
+          النشاط: activeRecently ? "نشط مؤخرًا" : "غير نشط مؤخرًا",
+          "آخر دخول": lastSignedIn ? lastSignedIn.toLocaleString("ar", { dateStyle: "medium", timeStyle: "short" }) : "لم يسجّل الدخول بعد",
+          "طريقة الدخول": row.loginMethod === "password" ? "بريد وكلمة مرور" : (row.loginMethod ?? "—"),
+        };
+      });
+  }, [data, roleFilter, userSearch]);
 
   return (
     <div className="space-y-6">
@@ -37,6 +54,7 @@ export default function AdminUsers() {
         </Panel>
       ) : (
         <div className="space-y-6">
+          <AdminOperationsDashboard />
           <AdminAiProviderSettings />
           <Panel>
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
@@ -57,8 +75,12 @@ export default function AdminUsers() {
           <LoadState loading={isLoading} error={error}>
             <Panel>
               <div className="mb-4 flex items-center gap-2 text-sm font-medium text-foreground">
-                <ShieldCheck className="size-4 text-primary" />
+                <UsersRound className="size-4 text-primary" />
                 المستخدمون المسجّلون ({formatValue(rows.length, 0)})
+              </div>
+              <div className="mb-4 grid gap-2 sm:grid-cols-[1fr_11rem]">
+                <div className="relative"><Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="البحث في المستخدمين" value={userSearch} onChange={event => setUserSearch(event.target.value)} placeholder="ابحث بالاسم أو البريد…" className="h-10 border-white/10 bg-black/15 pr-9" /></div>
+                <Select value={roleFilter} onValueChange={value => setRoleFilter(value as "all" | "admin" | "user")}><SelectTrigger aria-label="تصفية المستخدمين حسب الصلاحية" className="h-10 border-white/10 bg-black/15"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">كل الصلاحيات</SelectItem><SelectItem value="admin">المسؤولون</SelectItem><SelectItem value="user">المستخدمون</SelectItem></SelectContent></Select>
               </div>
               <DataTable rows={rows as never[]} />
               <div className="mt-4 flex flex-wrap gap-2">

@@ -14,6 +14,7 @@ import {
 import { getDb } from "./db";
 import { aiRouter } from "./routers/ai";
 import { adminAiRouter } from "./routers/adminAi";
+import { adminDashboardRouter } from "./routers/adminDashboard";
 import { alertCenterRouter } from "./routers/alertCenter";
 import { adminHeartbeatRouter } from "./routers/adminHeartbeat";
 import { backtestRouter } from "./routers/backtest";
@@ -76,6 +77,7 @@ export const appRouter = router({
             .from(users);
           return rows;
       }),
+      dashboard: adminDashboardRouter,
       ai: adminAiRouter,
       heartbeat: adminHeartbeatRouter,
     }),

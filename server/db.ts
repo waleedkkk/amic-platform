@@ -1,10 +1,11 @@
 import Decimal from "decimal.js";
-import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
 import {
   InsertSavedSignal,
   analysisExternalContextPreferences,
+  aiProviderSettings,
   aiConversationMessages,
   aiMemorySettings,
   chartPreferences,
@@ -435,6 +436,53 @@ export async function cleanupExpiredMarketSnapshots(options: { now?: Date; db?: 
   if (!db) return 0;
   const result = await db.delete(marketSnapshots).where(lt(marketSnapshots.expiresAt, cutoff));
   return Number((result as Array<{ affectedRows?: number }>)[0]?.affectedRows ?? 0);
+}
+
+/** ملخص تشغيلي محدود للمدير؛ يعرض أرقامًا إجمالية فقط ولا يسرّب بيانات أي مستخدم. */
+export async function getAdminOperationsSummary(now = new Date()) {
+  const db = await requireDb();
+  const activeSince = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000);
+  const cleanupCutoff = getMarketSnapshotCleanupCutoff(now);
+  const [
+    [totalUsers],
+    [adminUsers],
+    [recentUsers],
+    [openTrades],
+    [cachedSnapshots],
+    [cleanupEligibleSnapshots],
+    [configuredProviders],
+    activeProvider,
+    cleanupTaskUid,
+  ] = await Promise.all([
+    db.select({ total: count() }).from(users),
+    db.select({ total: count() }).from(users).where(eq(users.role, "admin")),
+    db.select({ total: count() }).from(users).where(gt(users.lastSignedIn, activeSince)),
+    db.select({ total: count() }).from(paperTrades).where(eq(paperTrades.status, "open")),
+    db.select({ total: count() }).from(marketSnapshots),
+    db.select({ total: count() }).from(marketSnapshots).where(lt(marketSnapshots.expiresAt, cleanupCutoff)),
+    db.select({ total: count() }).from(aiProviderSettings).where(isNotNull(aiProviderSettings.encryptedApiKey)),
+    db.select({ provider: aiProviderSettings.provider, model: aiProviderSettings.model }).from(aiProviderSettings).where(and(eq(aiProviderSettings.isActive, 1), eq(aiProviderSettings.enabled, 1))).limit(1),
+    getMarketSnapshotCleanupMonitorTaskUid(),
+  ]);
+
+  return {
+    checkedAt: now,
+    users: {
+      total: Number(totalUsers?.total ?? 0),
+      admins: Number(adminUsers?.total ?? 0),
+      activeLast7Days: Number(recentUsers?.total ?? 0),
+    },
+    paperTrading: { openTrades: Number(openTrades?.total ?? 0) },
+    marketCache: {
+      cachedSnapshots: Number(cachedSnapshots?.total ?? 0),
+      cleanupEligibleSnapshots: Number(cleanupEligibleSnapshots?.total ?? 0),
+    },
+    ai: {
+      configuredProviders: Number(configuredProviders?.total ?? 0),
+      activeProvider: activeProvider[0] ?? null,
+    },
+    cleanup: { registered: Boolean(cleanupTaskUid) },
+  };
 }
 
 const MAX_ASSISTANT_MEMORY_MESSAGES = 12;
