@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { and, count, desc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
 import {
@@ -449,6 +449,8 @@ export async function getAdminOperationsSummary(now = new Date()) {
     [recentUsers],
     [openTrades],
     [cachedSnapshots],
+    [freshSnapshots],
+    [retainedSnapshots],
     [cleanupEligibleSnapshots],
     [configuredProviders],
     activeProvider,
@@ -459,6 +461,8 @@ export async function getAdminOperationsSummary(now = new Date()) {
     db.select({ total: count() }).from(users).where(gt(users.lastSignedIn, activeSince)),
     db.select({ total: count() }).from(paperTrades).where(eq(paperTrades.status, "open")),
     db.select({ total: count() }).from(marketSnapshots),
+    db.select({ total: count() }).from(marketSnapshots).where(gt(marketSnapshots.expiresAt, now)),
+    db.select({ total: count() }).from(marketSnapshots).where(and(gte(marketSnapshots.expiresAt, cleanupCutoff), lte(marketSnapshots.expiresAt, now))),
     db.select({ total: count() }).from(marketSnapshots).where(lt(marketSnapshots.expiresAt, cleanupCutoff)),
     db.select({ total: count() }).from(aiProviderSettings).where(isNotNull(aiProviderSettings.encryptedApiKey)),
     db.select({ provider: aiProviderSettings.provider, model: aiProviderSettings.model }).from(aiProviderSettings).where(and(eq(aiProviderSettings.isActive, 1), eq(aiProviderSettings.enabled, 1))).limit(1),
@@ -475,6 +479,8 @@ export async function getAdminOperationsSummary(now = new Date()) {
     paperTrading: { openTrades: Number(openTrades?.total ?? 0) },
     marketCache: {
       cachedSnapshots: Number(cachedSnapshots?.total ?? 0),
+      freshSnapshots: Number(freshSnapshots?.total ?? 0),
+      retainedSnapshots: Number(retainedSnapshots?.total ?? 0),
       cleanupEligibleSnapshots: Number(cleanupEligibleSnapshots?.total ?? 0),
     },
     ai: {

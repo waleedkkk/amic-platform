@@ -1,10 +1,23 @@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { MetricCard, Panel, formatValue } from "@/components/market-ui";
 import { trpc } from "@/lib/trpc";
+import { getCacheChartData, getServiceChartData } from "@shared/adminOperationsCharts";
 import { Activity, Bot, DatabaseZap, RefreshCw, ShieldCheck, Trash2, UsersRound, WalletCards } from "lucide-react";
 import { useState } from "react";
+import { Bar, BarChart, Cell, Label, Pie, PieChart, XAxis, YAxis } from "recharts";
+
+const cacheChartConfig = {
+  fresh: { label: "صالحة حاليًا", color: "#34d399" },
+  retained: { label: "ضمن نافذة الاحتفاظ", color: "#fbbf24" },
+  cleanup: { label: "مؤهلة للتنظيف", color: "#fb7185" },
+} satisfies ChartConfig;
+
+const serviceChartConfig = {
+  value: { label: "مهيأة", color: "#38bdf8" },
+} satisfies ChartConfig;
 
 export function AdminOperationsDashboard() {
   const utils = trpc.useUtils();
@@ -19,6 +32,9 @@ export function AdminOperationsDashboard() {
   const [status, setStatus] = useState<string | null>(null);
   const data = overview.data;
   const checkedAt = data?.checkedAt ? new Date(data.checkedAt).toLocaleString("ar", { dateStyle: "short", timeStyle: "short" }) : null;
+  const cacheChartData = data ? getCacheChartData(data.marketCache) : [];
+  const cacheTotal = cacheChartData.reduce((sum, item) => sum + item.value, 0);
+  const serviceChartData = data ? getServiceChartData(data) : [];
   const refresh = () => {
     setStatus(null);
     void overview.refetch();
@@ -45,6 +61,20 @@ export function AdminOperationsDashboard() {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <Panel className="p-4">
+            <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold">توزيع كاش السوق</p><p className="mt-1 text-xs leading-5 text-muted-foreground">لقطات صالحة، ولقطات ضمن الاحتفاظ التشخيصي، ولقطات مؤهلة للتنظيف. لا يعرض الرسم سجلًا تاريخيًا غير محفوظ.</p></div><Badge variant="outline" className="border-white/10 bg-white/[0.03]">{formatValue(cacheTotal, 0)} لقطة</Badge></div>
+            {cacheTotal > 0 ? <div className="mt-3 grid items-center gap-2 min-[520px]:grid-cols-[11rem_1fr]" dir="rtl">
+              <ChartContainer id="admin-cache-distribution" config={cacheChartConfig} className="mx-auto aspect-square h-44 w-44"><PieChart><ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel nameKey="name" />} /><Pie data={cacheChartData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} strokeWidth={3}>{cacheChartData.map(item => <Cell key={item.key} fill={item.fill} />)}<Label position="center" content={({ viewBox }) => viewBox && "cx" in viewBox && "cy" in viewBox ? <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle"><tspan className="fill-foreground text-xl font-semibold">{formatValue(cacheTotal, 0)}</tspan><tspan x={viewBox.cx} dy="1.45em" className="fill-muted-foreground text-[10px]">إجمالي اللقطات</tspan></text> : null} /></Pie></PieChart></ChartContainer>
+              <ul className="grid gap-2" aria-label="تفصيل كاش السوق">{cacheChartData.map(item => <li key={item.key} className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2 text-xs"><span className="flex items-center gap-2"><span className="size-2.5 rounded-full" style={{ backgroundColor: item.fill }} />{item.name}</span><strong className="tabular-nums text-foreground">{formatValue(item.value, 0)}</strong></li>)}</ul>
+            </div> : <div className="mt-4 flex min-h-40 items-center justify-center rounded-xl border border-dashed border-white/10 text-center text-sm text-muted-foreground">لا توجد لقطات كاش محفوظة بعد. سيظهر التوزيع عند جلب بيانات السوق.</div>}
+          </Panel>
+
+          <Panel className="p-4">
+            <div><p className="text-sm font-semibold">مؤشرات تهيئة الخدمات</p><p className="mt-1 text-xs leading-5 text-muted-foreground">يعرض الرسم حالة التهيئة والبيانات المحلية فقط، وليس اختبار اتصال خارجيًا أو قياس وقت تشغيل.</p></div>
+            <ChartContainer id="admin-service-readiness" config={serviceChartConfig} className="mt-3 h-44 w-full"><BarChart accessibilityLayer data={serviceChartData} layout="vertical" margin={{ right: 8, left: 12 }}><XAxis type="number" domain={[0, 1]} hide /><YAxis type="category" dataKey="name" width={92} tickLine={false} axisLine={false} className="text-[11px]" /><ChartTooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} content={<ChartTooltipContent hideLabel formatter={(value, _name, item) => <div className="flex w-full items-center justify-between gap-3"><span className="text-muted-foreground">الحالة</span><span className="font-medium text-foreground">{item.payload.status}</span></div>} />} /><Bar dataKey="value" radius={6} fill="var(--color-value)" barSize={18} /></BarChart></ChartContainer>
+            <ul className="mt-1 grid gap-1.5 sm:grid-cols-3" aria-label="تفصيل حالة الخدمات">{serviceChartData.map(item => <li key={item.key} className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className={`size-2 rounded-full ${item.value ? "bg-emerald-400" : "bg-rose-400"}`} />{item.name}: <span className="text-foreground">{item.status}</span></li>)}</ul>
+          </Panel>
+
           <Panel className="p-4">
             <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold">ضوابط الخدمات</p><p className="mt-1 text-xs leading-5 text-muted-foreground">حالات التهيئة التي يمكن مراجعتها من دون كشف المفاتيح أو بيانات الحسابات.</p></div><Badge variant="outline" className="border-white/10 bg-white/[0.03]">آخر تحديث: {checkedAt ?? "—"}</Badge></div>
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
