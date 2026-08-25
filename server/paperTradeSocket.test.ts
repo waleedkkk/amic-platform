@@ -59,7 +59,7 @@ describe("paper trade WebSocket", () => {
     const port = (server.address() as AddressInfo).port;
 
     const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/paper-trading`, {
-      headers: { Origin: "http://localhost" },
+      headers: { Origin: `https://127.0.0.1:${port}` },
     });
     const readyPromise = waitForMessage(socket, message => message.type === "paper_trade.socket_ready");
     await new Promise<void>((resolve, reject) => {
