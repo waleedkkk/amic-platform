@@ -689,10 +689,10 @@ export async function getUserMarketPulsePreferences(userId: number) {
   return preferences;
 }
 
-export async function saveUserMarketPulsePreferences(userId: number, sections: string[]) {
+export async function saveUserMarketPulsePreferences(userId: number, preferences: Record<string, unknown>) {
   const db = await requireDb();
-  await db.insert(marketPulsePreferences).values({ userId, sections }).onDuplicateKeyUpdate({ set: { sections, updatedAt: new Date() } });
-  return { sections };
+  await db.insert(marketPulsePreferences).values({ userId, sections: preferences }).onDuplicateKeyUpdate({ set: { sections: preferences, updatedAt: new Date() } });
+  return preferences;
 }
 
 export async function getUserAnalysisExternalContextPreferences(userId: number) {

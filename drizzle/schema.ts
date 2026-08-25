@@ -287,7 +287,8 @@ export const orderFlowPreferences = mysqlTable("orderFlowPreferences", {
 
 export const marketPulsePreferences = mysqlTable("marketPulsePreferences", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
-  sections: json("sections").$type<string[]>().notNull(),
+  // بقي اسم العمود كما هو لتوافق القاعدة الحالية، لكن JSON يحفظ عقد تفضيل نبضة السوق الموسع.
+  sections: json("sections").$type<unknown>().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 

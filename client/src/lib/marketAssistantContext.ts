@@ -1,4 +1,4 @@
-export const MARKET_ASSISTANT_CONTEXT_KEY = "amic.market-assistant-context.v1";
+export const MARKET_ASSISTANT_CONTEXT_KEY = "amic.market-assistant-context.v2";
 
 export const MARKET_ASSISTANT_CONTEXT_FIELDS = [
   "globalSnapshot",
@@ -6,6 +6,7 @@ export const MARKET_ASSISTANT_CONTEXT_FIELDS = [
   "cryptoLosers",
   "stockGainers",
   "stockLosers",
+  "marketPulse",
 ] as const;
 
 export type MarketAssistantContext = Record<string, unknown>;

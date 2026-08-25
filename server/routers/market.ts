@@ -10,7 +10,7 @@ import { DEFAULT_CHART_PREFERENCES, chartLayerColorKeys, chartLayerOpacityKeys, 
 import { normalizeMultiTimeframeAnalysis, normalizeTechnicalAnalysis } from "../technicalAnalysis";
 import { fetchCorrelationContext } from "../correlationContext";
 import { correlationFromCandles } from "../../shared/correlation";
-import { DEFAULT_MARKET_PULSE_SECTIONS, MARKET_PULSE_SECTION_KEYS, normalizeMarketPulseSections } from "../../shared/marketPulsePreferences";
+import { DEFAULT_MARKET_PULSE_PREFERENCES, MARKET_PULSE_SECTION_KEYS, MARKET_PULSE_WIDGET_KEYS, normalizeMarketPulsePreferences, normalizeMarketPulseSections } from "../../shared/marketPulsePreferences";
 import { calculateConfluenceIct, type IndicatorCandle } from "../../shared/confluenceIct";
 import { calculateUnifiedDecision } from "../../shared/unifiedDecision";
 import { MAX_EXTERNAL_CONTEXT_REFERENCES, normalizeExternalContextReferences } from "../../shared/analysisExternalContext";
@@ -46,12 +46,29 @@ const chartPreferencesInput = z.object({
   priceScaleMode: z.enum(["normal", "logarithmic"]),
 });
 const marketPulseSectionsInput = z.object({ sections: z.array(z.enum(MARKET_PULSE_SECTION_KEYS)).min(1).max(MARKET_PULSE_SECTION_KEYS.length) });
+const marketPulsePreferencesInput = marketPulseSectionsInput.extend({
+  widgets: z.array(z.enum(MARKET_PULSE_WIDGET_KEYS)).max(MARKET_PULSE_WIDGET_KEYS.length),
+});
 const marketPulseSymbolInput = z.object({
   symbol: z.string().trim().min(1).max(32).transform(value => value.toUpperCase()),
   exchange: z.string().trim().min(1).max(32).transform(value => value.toUpperCase()),
 });
 const externalContextReferencesInput = z.object({ references: z.array(marketPulseSymbolInput).max(MAX_EXTERNAL_CONTEXT_REFERENCES) });
 export type SparklineRange = z.infer<typeof sparklineRange>;
+type MarketOverviewSliceResponse =
+  | { kind: "slice"; items: unknown; fetchedAt: string; source: string; market: string; direction: "gainers" | "losers" }
+  | { kind: "snapshot"; data: unknown; fetchedAt: string; source: string };
+const marketOverviewSlice = z.enum(["cryptoGainers", "cryptoLosers", "stockGainers", "stockLosers", "globalSnapshot"]);
+type MarketOverviewSliceKey = z.infer<typeof marketOverviewSlice>;
+
+async function loadMarketOverviewSlice(input: MarketOverviewSliceKey): Promise<MarketOverviewSliceResponse> {
+  const fetchedAt = new Date().toISOString();
+  if (input === "cryptoGainers") return { kind: "slice", items: await callTradingViewTool("top_gainers", { exchange: "BINANCE", timeframe: "1D", limit: 6 }), fetchedAt, source: "TradingView MCP", market: "BINANCE", direction: "gainers" };
+  if (input === "cryptoLosers") return { kind: "slice", items: await callTradingViewTool("top_losers", { exchange: "BINANCE", timeframe: "1D", limit: 6 }), fetchedAt, source: "TradingView MCP", market: "BINANCE", direction: "losers" };
+  if (input === "stockGainers") return { kind: "slice", items: await callTradingViewTool("top_gainers", { exchange: "NASDAQ", timeframe: "1D", limit: 6 }), fetchedAt, source: "TradingView MCP", market: "NASDAQ", direction: "gainers" };
+  if (input === "stockLosers") return { kind: "slice", items: await callTradingViewTool("top_losers", { exchange: "NASDAQ", timeframe: "1D", limit: 6 }), fetchedAt, source: "TradingView MCP", market: "NASDAQ", direction: "losers" };
+  return { kind: "snapshot", data: await callTradingViewTool("market_snapshot", {}), fetchedAt, source: "TradingView MCP" };
+}
 
 function intervalToRange(interval: CandleInterval): string {
   switch (interval) {
@@ -260,16 +277,25 @@ export const marketRouter = router({
   ),
 
   overviewSlice: publicProcedure
-    .input(z.enum(["cryptoGainers", "cryptoLosers", "stockGainers", "stockLosers", "globalSnapshot"]))
+    .input(marketOverviewSlice)
     .query(({ input }) =>
-      cached(`overview:${input}:1D`, "global", "MULTI", "1D", 300, () => {
-        if (input === "cryptoGainers") return callTradingViewTool("top_gainers", { exchange: "BINANCE", timeframe: "1D", limit: 6 });
-        if (input === "cryptoLosers") return callTradingViewTool("top_losers", { exchange: "BINANCE", timeframe: "1D", limit: 6 });
-        if (input === "stockGainers") return callTradingViewTool("top_gainers", { exchange: "NASDAQ", timeframe: "1D", limit: 6 });
-        if (input === "stockLosers") return callTradingViewTool("top_losers", { exchange: "NASDAQ", timeframe: "1D", limit: 6 });
-        return callTradingViewTool("market_snapshot", {});
-      }),
+      cached<MarketOverviewSliceResponse>(`overview:v2:${input}:1D`, "global", "MULTI", "1D", 300, () => loadMarketOverviewSlice(input)),
     ),
+
+  refreshOverviewSlice: publicProcedure
+    .input(marketOverviewSlice)
+    .mutation(async ({ input }) => {
+      const result = await loadMarketOverviewSlice(input);
+      await saveMarketSnapshot({
+        cacheKey: `overview:v2:${input}:1D`,
+        market: "global",
+        exchange: "MULTI",
+        timeframe: "1D",
+        payload: result,
+        expiresAt: new Date(Date.now() + 300_000),
+      });
+      return result;
+    }),
 
   overview: publicProcedure.query(async () =>
     cached("overview:global:1D", "global", "MULTI", "1D", 60, async () => {
@@ -400,13 +426,24 @@ export const marketRouter = router({
     getPreferences: protectedProcedure.query(async ({ ctx }) => {
       const [preferences, watchlist] = await Promise.all([getUserMarketPulsePreferences(ctx.user.id), listUserWatchlist(ctx.user.id)]);
       return {
-        sections: normalizeMarketPulseSections(preferences?.sections ?? DEFAULT_MARKET_PULSE_SECTIONS),
+        ...normalizeMarketPulsePreferences(preferences?.sections ?? DEFAULT_MARKET_PULSE_PREFERENCES),
         watchlist,
       };
     }),
     saveSections: protectedProcedure
       .input(marketPulseSectionsInput)
-      .mutation(({ ctx, input }) => saveUserMarketPulsePreferences(ctx.user.id, normalizeMarketPulseSections(input.sections))),
+      .mutation(async ({ ctx, input }) => {
+        const current = await getUserMarketPulsePreferences(ctx.user.id);
+        const preferences = normalizeMarketPulsePreferences(current?.sections ?? DEFAULT_MARKET_PULSE_PREFERENCES);
+        const next = { ...preferences, sections: normalizeMarketPulseSections(input.sections) };
+        return saveUserMarketPulsePreferences(ctx.user.id, next);
+      }),
+    savePreferences: protectedProcedure
+      .input(marketPulsePreferencesInput)
+      .mutation(({ ctx, input }) => {
+        const preferences = normalizeMarketPulsePreferences(input);
+        return saveUserMarketPulsePreferences(ctx.user.id, preferences);
+      }),
     addSymbol: protectedProcedure
       .input(marketPulseSymbolInput)
       .mutation(async ({ ctx, input }) => {
@@ -420,7 +457,7 @@ export const marketRouter = router({
       .mutation(({ ctx, input }) => removeUserWatchlistItem(ctx.user.id, input.symbol, input.exchange)),
     watchlistQuotes: protectedProcedure.query(async ({ ctx }) => {
       const watchlist = (await listUserWatchlist(ctx.user.id)).slice(0, 8);
-      return Promise.all(watchlist.map(async item => {
+      const loaded = await Promise.allSettled(watchlist.map(async item => {
         const analysis = await cached(
           `pulse:watchlist:${item.exchange}:${item.symbol}:1h`,
           "pulse-watchlist",
@@ -429,8 +466,23 @@ export const marketRouter = router({
           45,
           async () => normalizeTechnicalAnalysis(await callTradingViewTool("coin_analysis", { symbol: item.symbol, exchange: item.exchange, timeframe: "1h" }), { symbol: item.symbol, exchange: item.exchange, timeframe: "1h" }),
         );
-        return { symbol: item.symbol, exchange: item.exchange, assetClass: item.assetClass, price: analysis.price.current ?? analysis.price.close ?? null, changePercent: analysis.price.changePercent ?? null, recommendation: analysis.recommendation.signal ?? "neutral" };
+        return { symbol: item.symbol, exchange: item.exchange, assetClass: item.assetClass, price: analysis.price.current ?? analysis.price.close ?? null, changePercent: analysis.price.changePercent ?? null, recommendation: analysis.recommendation.signal ?? "neutral", source: analysis.source ?? "TradingView MCP", fetchedAt: new Date().toISOString(), error: null };
       }));
+      return loaded.map((result, index) => {
+        if (result.status === "fulfilled") return result.value;
+        const item = watchlist[index];
+        return {
+          symbol: item.symbol,
+          exchange: item.exchange,
+          assetClass: item.assetClass,
+          price: null,
+          changePercent: null,
+          recommendation: "neutral",
+          source: null,
+          fetchedAt: null,
+          error: "تعذّر تحديث هذا الرمز الآن؛ بقية القائمة ما زالت متاحة.",
+        };
+      });
     }),
   }),
 

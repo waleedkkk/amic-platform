@@ -138,23 +138,49 @@ describe("marketRouter.pulse", () => {
 
     await expect(caller.pulse.getPreferences()).resolves.toMatchObject({
       sections: ["cryptoGainers", "cryptoLosers", "stockGainers", "stockLosers"],
+      widgets: ["summary", "preciousMetals", "watchlist", "correlation", "globalSnapshot", "assistantContext"],
       watchlist: [{ symbol: "BTCUSDT", exchange: "BINANCE" }],
     });
     expect(databaseMocks.getUserMarketPulsePreferences).toHaveBeenCalledWith(77);
     expect(databaseMocks.listUserWatchlist).toHaveBeenCalledWith(77);
   });
 
-  it("يطبع الأقسام المحفوظة ويصنف رمز المستخدم وفق سوقه", async () => {
+  it("يطبع الأقسام والوحدات المحفوظة ويصنف رمز المستخدم وفق سوقه", async () => {
+    databaseMocks.getUserMarketPulsePreferences.mockResolvedValue({ sections: { sections: ["cryptoGainers"], widgets: ["summary"] } });
     databaseMocks.saveUserMarketPulsePreferences.mockResolvedValue({ sections: ["stockLosers"] });
     databaseMocks.listUserWatchlist.mockResolvedValue([]);
     databaseMocks.addUserWatchlistItem.mockResolvedValue([{ symbol: "XAUUSD", exchange: "FX", assetClass: "futures" }]);
     const caller = marketRouter.createCaller(authenticatedContext);
 
     await caller.pulse.saveSections({ sections: ["stockLosers", "stockLosers"] });
-    expect(databaseMocks.saveUserMarketPulsePreferences).toHaveBeenCalledWith(77, ["stockLosers"]);
+    expect(databaseMocks.saveUserMarketPulsePreferences).toHaveBeenCalledWith(77, { sections: ["stockLosers"], widgets: ["summary"] });
+
+    await caller.pulse.savePreferences({ sections: ["cryptoLosers"], widgets: ["watchlist", "assistantContext", "assistantContext"] });
+    expect(databaseMocks.saveUserMarketPulsePreferences).toHaveBeenLastCalledWith(77, { sections: ["cryptoLosers"], widgets: ["watchlist", "assistantContext"] });
 
     await caller.pulse.addSymbol({ symbol: "xauusd", exchange: "fx" });
     expect(databaseMocks.addUserWatchlistItem).toHaveBeenCalledWith(77, { symbol: "XAUUSD", exchange: "FX", assetClass: "futures" });
+  });
+
+  it("يعيد فشل الرمز الشخصي كحالة جزئية ولا يحجب الرموز السليمة", async () => {
+    databaseMocks.listUserWatchlist.mockResolvedValue([
+      { symbol: "BTCUSDT", exchange: "BINANCE", assetClass: "crypto" },
+      { symbol: "ETHUSDT", exchange: "BINANCE", assetClass: "crypto" },
+    ]);
+    databaseMocks.getMarketSnapshot.mockResolvedValue(undefined);
+    databaseMocks.saveMarketSnapshot.mockResolvedValue(undefined);
+    mcpMocks.callTradingViewTool.mockImplementation(async (_name: string, args: Record<string, unknown>) => {
+      if (args.symbol === "ETHUSDT") throw new Error("المزود غير متاح للرمز");
+      return { price_data: { current_price: 65_000, change_percent: 2.3 }, market_sentiment: { buy_sell_signal: "BUY" } };
+    });
+    const caller = marketRouter.createCaller(authenticatedContext);
+
+    const result = await caller.pulse.watchlistQuotes();
+
+    expect(result).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbol: "BTCUSDT", price: 65_000, error: null }),
+      expect.objectContaining({ symbol: "ETHUSDT", price: null, error: expect.stringContaining("بقية القائمة") }),
+    ]));
   });
 });
 

@@ -1,6 +1,7 @@
 import { TradeDecisionReadinessCard } from "@/components/TradeDecisionReadinessCard";
 import { EmptyAction, formatValue, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
 import { PaperTradeAlertCenter } from "@/components/PaperTradeAlertCenter";
+import { PaperTradeCloseProgress, type PaperTradeCloseProgressStage } from "@/components/PaperTradeCloseProgress";
 import type { PaperTradeAlert } from "@/hooks/usePaperTradeAlerts";
 import { usePaperTradeAlerts } from "@/hooks/usePaperTradeAlerts";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
@@ -60,6 +61,7 @@ export default function PaperTrading() {
   const [draftRiskSources, setDraftRiskSources] = useState<DraftRiskSources | null>(null);
   const [closePrices, setClosePrices] = useState<Record<number, string>>({});
   const [pendingClose, setPendingClose] = useState<PendingCloseConfirmation | null>(null);
+  const [closeProgress, setCloseProgress] = useState<{ tradeId: number; stage: PaperTradeCloseProgressStage } | null>(null);
   const utils = trpc.useUtils();
   const trades = trpc.paperTrading.list.useQuery();
   const referencePrices = trpc.paperTrading.referencePrices.useQuery(undefined, { staleTime: 30_000, refetchOnWindowFocus: true });
@@ -86,22 +88,31 @@ export default function PaperTrading() {
       if (!result.closed) {
         if (result.requiresConfirmation && result.referencePrice && result.priceDeviationPercent !== null) {
           const trade = openTrades.find(item => item.id === result.id);
-          if (trade) setPendingClose({ id: trade.id, closePrice: closePrices[trade.id] ?? "", symbol: trade.symbol, exchange: trade.exchange, referencePrice: result.referencePrice, priceDeviationPercent: result.priceDeviationPercent });
+          if (trade) {
+            setCloseProgress({ tradeId: trade.id, stage: "awaiting_confirmation" });
+            setPendingClose({ id: trade.id, closePrice: closePrices[trade.id] ?? "", symbol: trade.symbol, exchange: trade.exchange, referencePrice: result.referencePrice, priceDeviationPercent: result.priceDeviationPercent });
+          }
         } else {
+          setCloseProgress(null);
           toast.error("تعذر إغلاق الصفقة؛ لم يكتمل الفحص المرجعي.");
         }
         return;
       }
       setPendingClose(null);
+      setCloseProgress(null);
       toast.success(`أُغلقت الصفقة. الربح/الخسارة المحققة: ${formatValue(result.realizedPnl, 4)}. يمكنك طلب نقد تعليمي اختياري من صفحة نقد الصفقات.`);
       refreshTrades();
     },
-    onError: error => toast.error(error.message),
+    onError: error => {
+      setCloseProgress(null);
+      toast.error(error.message);
+    },
   });
 
   const requestClose = (tradeId: number) => {
     const closePrice = closePrices[tradeId]?.trim();
     if (!closePrice) return toast.error("أدخل سعر الإغلاق أولًا.");
+    setCloseProgress({ tradeId, stage: "checking" });
     close.mutate({ id: tradeId, closePrice, confirmPriceDeviation: false });
   };
 
@@ -155,6 +166,7 @@ export default function PaperTrading() {
       referencePrice: alert.referencePrice,
       priceDeviationPercent: alert.deviationPercent,
     });
+    setCloseProgress({ tradeId: trade.id, stage: "awaiting_confirmation" });
   };
 
   return <>
@@ -183,11 +195,14 @@ export default function PaperTrading() {
         </form>
       </Panel>
       <div className="space-y-4">
-        <Panel><div className="mb-5 flex items-center justify-between gap-3"><div><h2 className="font-semibold">المراكز المفتوحة</h2><p className="mt-1 text-xs text-muted-foreground">{trades.isLoading ? "—" : `${openTrades.length} مركز ضمن حسابك`}</p></div><SignalBadge value="neutral" /></div>{trades.isLoading ? <p className="text-sm text-muted-foreground">جارٍ تحميل المراكز…</p> : openTrades.length ? <div className="space-y-3">{openTrades.map(trade => <div key={trade.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4"><div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between"><div><p className="font-mono text-sm font-medium">{trade.symbol} <span className="text-muted-foreground">· {trade.exchange}</span></p><p className="mt-1 text-xs leading-5 text-muted-foreground">{trade.side === "long" ? "Long" : "Short"} · كمية {formatValue(trade.quantity, 6)} · دخول {formatValue(trade.entryPrice, 6)}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">SL: {trade.stopLoss ? formatValue(trade.stopLoss, 6) : "—"} · TP: {trade.takeProfit ? formatValue(trade.takeProfit, 6) : "—"}</p></div><div className="flex flex-col gap-2 min-[420px]:flex-row"><div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground">{referencePrices.isLoading ? "جارٍ جلب السعر المرجعي…" : referenceByAsset.get(paperTradeAssetKey(trade.symbol, trade.exchange))?.price ? `آخر سعر معروف: ${formatValue(referenceByAsset.get(paperTradeAssetKey(trade.symbol, trade.exchange))!.price, 6)}` : "لا يتوفر سعر مرجعي حالي"}</p><Input aria-label="سعر الإغلاق" inputMode="decimal" placeholder="سعر الإغلاق" className="h-11 w-full bg-black/15 font-mono text-sm min-[420px]:h-9 min-[420px]:w-28 min-[420px]:text-xs" value={closePrices[trade.id] ?? ""} onChange={event => setClosePrices({ ...closePrices, [trade.id]: event.target.value })} /><Button size="sm" variant="outline" className="min-h-11 w-full bg-white/[0.03] min-[420px]:min-h-0 min-[420px]:w-auto" disabled={!closePrices[trade.id] || close.isPending} onClick={() => requestClose(trade.id)}><ArrowDownToLine className="ml-1 size-3.5" />إغلاق</Button></div></div></div></div>)}</div> : <EmptyAction title="لا توجد مراكز مفتوحة" description="عند فتح صفقة محاكاة ستظهر هنا مع أداة لإغلاقها وحساب الربح أو الخسارة." href="/analysis" action="راجع التحليل أولًا" />}</Panel>
+        <Panel><div className="mb-5 flex items-center justify-between gap-3"><div><h2 className="font-semibold">المراكز المفتوحة</h2><p className="mt-1 text-xs text-muted-foreground">{trades.isLoading ? "—" : `${openTrades.length} مركز ضمن حسابك`}</p></div><SignalBadge value="neutral" /></div>{trades.isLoading ? <p className="text-sm text-muted-foreground">جارٍ تحميل المراكز…</p> : openTrades.length ? <div className="space-y-3">{openTrades.map(trade => {
+          const activeCloseStage = closeProgress?.tradeId === trade.id ? closeProgress.stage : null;
+          return <div key={trade.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4"><div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between"><div><p className="font-mono text-sm font-medium">{trade.symbol} <span className="text-muted-foreground">· {trade.exchange}</span></p><p className="mt-1 text-xs leading-5 text-muted-foreground">{trade.side === "long" ? "Long" : "Short"} · كمية {formatValue(trade.quantity, 6)} · دخول {formatValue(trade.entryPrice, 6)}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">SL: {trade.stopLoss ? formatValue(trade.stopLoss, 6) : "—"} · TP: {trade.takeProfit ? formatValue(trade.takeProfit, 6) : "—"}</p></div><div className="flex flex-col gap-2 min-[420px]:flex-row"><div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground">{referencePrices.isLoading ? "جارٍ جلب السعر المرجعي…" : referenceByAsset.get(paperTradeAssetKey(trade.symbol, trade.exchange))?.price ? `آخر سعر معروف: ${formatValue(referenceByAsset.get(paperTradeAssetKey(trade.symbol, trade.exchange))!.price, 6)}` : "لا يتوفر سعر مرجعي حالي"}</p><Input aria-label="سعر الإغلاق" inputMode="decimal" placeholder="سعر الإغلاق" className="h-11 w-full bg-black/15 font-mono text-sm min-[420px]:h-9 min-[420px]:w-28 min-[420px]:text-xs" value={closePrices[trade.id] ?? ""} onChange={event => { setClosePrices({ ...closePrices, [trade.id]: event.target.value }); setCloseProgress(current => current?.tradeId === trade.id ? null : current); }} /><Button size="sm" variant="outline" className="min-h-11 w-full bg-white/[0.03] min-[420px]:min-h-0 min-[420px]:w-auto" disabled={!closePrices[trade.id] || close.isPending} onClick={() => requestClose(trade.id)}><ArrowDownToLine className="ml-1 size-3.5" />{activeCloseStage === "checking" ? "جارٍ الفحص…" : "إغلاق"}</Button></div></div></div>{activeCloseStage ? <PaperTradeCloseProgress stage={activeCloseStage} compact className="mt-3" /> : null}</div>;
+        })}</div> : <EmptyAction title="لا توجد مراكز مفتوحة" description="عند فتح صفقة محاكاة ستظهر هنا مع أداة لإغلاقها وحساب الربح أو الخسارة." href="/analysis" action="راجع التحليل أولًا" />}</Panel>
         <Panel><h2 className="font-semibold">سجل الصفقات المغلقة</h2><div className="mt-4 space-y-2">{closedTrades.length ? closedTrades.slice(0, 8).map(trade => <div key={trade.id} className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] px-3 py-2 text-sm"><span className="truncate font-mono">{trade.symbol}</span><span className={Number(trade.realizedPnl) >= 0 ? "shrink-0 font-mono text-emerald-300" : "shrink-0 font-mono text-rose-300"}>{formatValue(trade.realizedPnl, 5)}</span></div>) : <p className="text-sm text-muted-foreground">لا توجد صفقات مغلقة بعد.</p>}</div></Panel>
       </div>
     </div>
-    <AlertDialog open={Boolean(pendingClose)} onOpenChange={openState => { if (!openState && !close.isPending) setPendingClose(null); }}>
+    <AlertDialog open={Boolean(pendingClose)} onOpenChange={openState => { if (!openState && !close.isPending) { setCloseProgress(current => current?.tradeId === pendingClose?.id ? null : current); setPendingClose(null); } }}>
       <AlertDialogContent dir="rtl">
         <AlertDialogHeader>
           <AlertDialogTitle>تأكيد الإغلاق بسعر بعيد</AlertDialogTitle>
@@ -195,6 +210,7 @@ export default function PaperTrading() {
             سعر الإغلاق للصفقة {pendingClose?.symbol} ({pendingClose?.exchange}) يبعد {pendingClose ? `${pendingClose.priceDeviationPercent.toFixed(2)}%` : "—"} عن آخر سعر معروف ({pendingClose?.referencePrice ?? "—"}). هل تريد تأكيد الإغلاق يدويًا بهذا السعر؟
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {pendingClose ? <PaperTradeCloseProgress stage={close.isPending ? "closing" : "awaiting_confirmation"} /> : null}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={close.isPending}>إلغاء</AlertDialogCancel>
           <AlertDialogAction
@@ -202,6 +218,7 @@ export default function PaperTrading() {
             onClick={event => {
               event.preventDefault();
               if (!pendingClose) return;
+              setCloseProgress({ tradeId: pendingClose.id, stage: "closing" });
               close.mutate({ id: pendingClose.id, closePrice: pendingClose.closePrice, confirmPriceDeviation: true });
             }}
           >

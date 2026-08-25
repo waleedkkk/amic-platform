@@ -8,7 +8,7 @@ import { Gem, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-const MARKET_SUMMARY_PROMPT = "لخّص لي وضع السوق الحالي بناءً على البيانات المرفقة";
+const MARKET_SUMMARY_PROMPT = "لخّص لي نبضة السوق وفق الأسواق واتجاهات الرابحين/الخاسرين والرموز التي خصصتها في البيانات المرفقة، واذكر مصدر البيانات ووقت جلبها إن توفرا.";
 
 export default function AiAssistant() {
   const [messages, setMessages] = useState<Message[]>([]);
