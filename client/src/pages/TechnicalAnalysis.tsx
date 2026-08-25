@@ -3,7 +3,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CandlestickChart as PriceChart } from "@/components/CandlestickChart";
-import { ConfluenceBreakdownPanel } from "@/components/ConfluenceBreakdownPanel";
+import { LazyConfluenceBreakdownPanel } from "@/components/LazyConfluenceBreakdownPanel";
+import { UnifiedDecisionSummaryCard } from "@/components/UnifiedDecisionSummaryCard";
 import { SessionHeatmapPanel } from "@/components/SessionHeatmapPanel";
 import { TimeframeAlignmentPanel } from "@/components/TimeframeAlignmentPanel";
 import { ExternalContextCards } from "@/components/ExternalContextCards";
@@ -35,6 +36,7 @@ export default function TechnicalAnalysis() {
   const [form, setForm] = useState({ symbol: "BTCUSDT", exchange: "BINANCE", timeframe: "1h" as (typeof timeframes)[number] });
   const [params, setParams] = useState(form);
   const query = trpc.market.analysis.useQuery(useMemo(() => params, [params]), { refetchOnWindowFocus: true, refetchInterval: 60_000 });
+  const decisionQuery = trpc.market.decisionSummary.useQuery(useMemo(() => params, [params]), { refetchOnWindowFocus: false, refetchInterval: 60_000, retry: 1 });
   const saveSignal = trpc.signals.save.useMutation({
     onSuccess: () => toast.success("حُفظت الإشارة في سجلك الخاص."),
     onError: error => toast.error(error.message),
@@ -143,6 +145,8 @@ export default function TechnicalAnalysis() {
         </div>
       ) : null}
 
+      <UnifiedDecisionSummaryCard summary={decisionQuery.data} isLoading={decisionQuery.isLoading} error={decisionQuery.error?.message} />
+
       <BinanceOrderFlowContextCard symbol={params.symbol} exchange={params.exchange} />
 
       <div className="mt-6">
@@ -154,7 +158,7 @@ export default function TechnicalAnalysis() {
           <CorrelationContextPanel context={data?.correlationContext} />
           <TimeframeAlignmentPanel symbol={params.symbol} exchange={params.exchange} atr={data?.indicators.atr.value ?? null} price={price} />
           <ExternalContextCards symbol={params.symbol} exchange={params.exchange} />
-          <ConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} interval={params.timeframe === "1h" ? "60m" : params.timeframe === "1D" ? "1d" : params.timeframe === "1W" ? "1wk" : params.timeframe} />
+          <LazyConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} interval={params.timeframe === "1h" ? "60m" : params.timeframe === "1D" ? "1d" : params.timeframe === "1W" ? "1wk" : params.timeframe} />
           <SessionHeatmapPanel symbol={params.symbol} exchange={params.exchange} />
           {unavailableMetrics.length > 0 ? <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">تعذّر على مزود التحليل تقديم {unavailableMetrics.join("، ")} لهذه القراءة. تبقى بقية بيانات التحليل متاحة، ويمكنك إعادة التحديث أو تجربة إطار آخر.</div> : null}
 

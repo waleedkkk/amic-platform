@@ -12,6 +12,7 @@ import { handleEconomicCalendarSchedule } from "../scheduledEconomicCalendar";
 import { handleDailyMarketDigestSchedule } from "../scheduledDailyMarketDigest";
 import { handleMarketSnapshotCleanupSchedule } from "../scheduledMarketSnapshotCleanup";
 import { serveStatic, setupVite } from "./vite";
+import { attachPaperTradeWebSocket } from "../paperTradeSocket";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -37,6 +38,7 @@ async function startServer() {
   getRequiredJwtSecret();
   const app = express();
   const server = createServer(app);
+  attachPaperTradeWebSocket(server);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

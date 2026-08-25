@@ -5,6 +5,7 @@ import { getCandleHistoryCached } from "../candles";
 import { assessSignalFollowThrough, summarizeSignalFollowThrough } from "../signalPerformance";
 import { generatePaperTradeCritique } from "../tradeCritique";
 import { guessClosestPriorSignal, type SignalLinkType } from "../paperTradeSignalLink";
+import { getPaperTradeReferencePrice } from "../paperTradeReference";
 
 const tradeInput = z.object({
   symbol: z.string().trim().min(1).max(32),
@@ -21,6 +22,18 @@ const tradeInput = z.object({
 
 export const paperTradingRouter = router({
   list: protectedProcedure.query(({ ctx }) => listUserPaperTrades(ctx.user.id)),
+  referencePrices: protectedProcedure.query(async ({ ctx }) => {
+    const openTrades = (await listUserPaperTrades(ctx.user.id)).filter(trade => trade.status === "open");
+    const uniqueAssets = Array.from(new Map(openTrades.map(trade => {
+      const symbol = trade.symbol.trim().toUpperCase();
+      const exchange = trade.exchange.trim().toUpperCase();
+      return [`${exchange}:${symbol}`, { symbol, exchange }] as const;
+    })).values());
+    return Promise.all(uniqueAssets.map(async asset => ({
+      ...asset,
+      reference: await getPaperTradeReferencePrice(asset.symbol, asset.exchange),
+    })));
+  }),
   summary: protectedProcedure.query(({ ctx }) => getUserPaperTradingSummary(ctx.user.id)),
   signalPerformance: protectedProcedure.query(async ({ ctx }) => {
     const signals = (await listUserSignals(ctx.user.id)).slice(0, 12);
@@ -36,8 +49,8 @@ export const paperTradingRouter = router({
   }),
   open: protectedProcedure.input(tradeInput).mutation(({ ctx, input }) => createPaperTrade(ctx.user.id, input)),
   close: protectedProcedure
-    .input(z.object({ id: z.number().int().positive(), closePrice: z.string().regex(/^\d+(\.\d+)?$/) }))
-    .mutation(({ ctx, input }) => closeUserPaperTrade(ctx.user.id, input.id, input.closePrice)),
+    .input(z.object({ id: z.number().int().positive(), closePrice: z.string().regex(/^\d+(\.\d+)?$/), confirmPriceDeviation: z.boolean().optional().default(false) }))
+    .mutation(({ ctx, input }) => closeUserPaperTrade(ctx.user.id, input.id, input.closePrice, { confirmPriceDeviation: input.confirmPriceDeviation })),
   critique: router({
     get: protectedProcedure.input(z.object({ tradeId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const critique = await getUserPaperTradeCritique(ctx.user.id, input.tradeId);

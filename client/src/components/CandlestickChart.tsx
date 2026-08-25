@@ -5,11 +5,12 @@ import { trpc } from "@/lib/trpc";
 import { calculateSma, findLatestSmaCrossover, type MovingAverageCrossover } from "@shared/movingAverageCrossover";
 import { analyzeMarketStructure, type MarketStructure } from "@shared/marketStructure";
 import { getBinanceKlineStream, mergeHistoricalCandles, mergeLiveCandle, parseBinanceKlineMessage, type LiveChartCandle } from "@shared/chartLive";
-import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences, type ChartLayerPreferences, type ChartPreferences } from "@shared/chartPreferences";
+import { DEFAULT_CHART_LAYER_STYLES, DEFAULT_CHART_PREFERENCES, chartLayerColorWithOpacity, normalizeChartPreferences, type ChartLayerColorKey, type ChartLayerOpacityKey, type ChartLayerPreferences, type ChartPreferences } from "@shared/chartPreferences";
 import { describeLiveProviderStatus, type ChartLiveProviderStatus } from "@/lib/liveProviderStatus";
 import { getAdaptiveCandleLimit, getChartViewportHeight, shouldLoadChartData } from "@/lib/adaptiveCandleWindow";
 import { getChartOverlayDensity } from "@/lib/chartOverlayDensity";
 import { selectMostRecentOverlays } from "@/lib/chartOverlaySelection";
+import { ChartLayerStylePanel } from "@/components/ChartLayerStylePanel";
 import { getChartFullscreenPortalContainer, isChartFullscreenTarget, requestChartFullscreen, type ChartFullscreenMode } from "@/lib/chartFullscreen";
 import { countEnabledIctLayers, ICT_LAYER_CONTROLS } from "@/lib/chartMobileControls";
 import { getFitContentKey } from "@/lib/chartViewport";
@@ -23,7 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { describeCandleDataStatus, getMarketAssetProfile } from "@shared/marketAssetProfile";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateConfluenceIct, ICT_MAX_SCORE, type ConfluenceIctSettings } from "@shared/confluenceIct";
-import { CircleHelp, Maximize2, Minimize2, Radio, SlidersHorizontal } from "lucide-react";
+import { CircleHelp, Maximize2, Minimize2, Paintbrush, Radio, SlidersHorizontal } from "lucide-react";
 import {
   CandlestickSeries,
   createTextWatermark,
@@ -157,6 +158,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   const [interval, setInterval] = useState<ChartInterval>("1d");
   const [preferences, setPreferences] = useState<ChartPreferences>(DEFAULT_CHART_PREFERENCES);
   const [showConfluenceSettings, setShowConfluenceSettings] = useState(false);
+  const [showLayerStyleSettings, setShowLayerStyleSettings] = useState(false);
   const showLegacySma = isLegacyChartLayerVisible(preferences, "sma");
   const showLegacyEma = isLegacyChartLayerVisible(preferences, "ema");
   const showLegacyLevels = isLegacyChartLayerVisible(preferences, "levels");
@@ -315,7 +317,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       const lastHistorical = chartCandlesRef.current.at(-1);
       if (!lastHistorical || candle.time < Number(lastHistorical.time)) return;
       candleSeriesRef.current?.update({ time: candle.time as Time, open: candle.open, high: candle.high, low: candle.low, close: candle.close });
-      overlaysRef.current?.volume.update({ time: candle.time as Time, value: candle.volume, color: candle.close >= candle.open ? "rgba(22,163,74,0.45)" : "rgba(220,38,38,0.45)" });
+      const styles = preferences.layerStyles;
+      overlaysRef.current?.volume.update({ time: candle.time as Time, value: candle.volume, color: candle.close >= candle.open ? chartLayerColorWithOpacity(styles.colors.volumeUp, styles.opacity.volume) : chartLayerColorWithOpacity(styles.colors.volumeDown, styles.opacity.volume) });
     };
     setLiveStatus(reconnectAttempt ? "reconnecting" : "connecting");
     const socket = new WebSocket(liveStreamUrl);
@@ -344,7 +347,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       if (syncTimer) window.clearTimeout(syncTimer);
       socket.close();
     };
-  }, [liveStreamUrl, reconnectAttempt]);
+  }, [liveStreamUrl, reconnectAttempt, preferences.layerStyles]);
 
   useEffect(() => {
     if (exchange.toUpperCase() === "BINANCE") return;
@@ -536,6 +539,8 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     const highs = data.map(c => c.high);
     const lows = data.map(c => c.low);
     const volumes = data.map(c => c.volume ?? 0);
+    const styles = preferences.layerStyles;
+    const layerColor = (key: ChartLayerColorKey, opacity: ChartLayerOpacityKey) => chartLayerColorWithOpacity(styles.colors[key], styles.opacity[opacity]);
 
     const apply = (series: ISeriesApi<"Line"> | ISeriesApi<"Histogram">, show: boolean, points: { time: Time; value: number }[]) => {
       if (show && points.length > 0) {
@@ -548,12 +553,16 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     };
 
     const sma20Vals = calculateSma(closes, 20);
+    overlays.sma20.applyOptions({ color: layerColor("sma20", "trend") });
     apply(overlays.sma20, showLegacySma, closes.map((v, i) => sma20Vals[i]).map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
     const sma50Vals = calculateSma(closes, 50);
+    overlays.sma50.applyOptions({ color: layerColor("sma50", "trend") });
     apply(overlays.sma50, showLegacySma, sma50Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
     const ema12Vals = ema(closes, 12);
+    overlays.ema12.applyOptions({ color: layerColor("ema12", "trend") });
     apply(overlays.ema12, showLegacyEma, ema12Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
     const ema26Vals = ema(closes, 26);
+    overlays.ema26.applyOptions({ color: layerColor("ema26", "trend") });
     apply(overlays.ema26, showLegacyEma, ema26Vals.map((v, i) => v !== null ? { time: data[i].time as Time, value: v } : null).filter((p): p is { time: Time; value: number } => p !== null));
 
     const lookback = Math.min(55, data.length);
@@ -587,7 +596,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     if (showLegacyLevels) {
       decorationsRef.current.levelLines = selectMostRecentOverlays(structure.levels, overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
         price: level.price,
-        color: level.kind === "support" ? "rgba(22,163,74,0.46)" : "rgba(220,38,38,0.46)",
+        color: level.kind === "support" ? layerColor("support", "levels") : layerColor("resistance", "levels"),
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
@@ -616,7 +625,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       decorationsRef.current.zoneLines = selectMostRecentOverlays(structure.zones, overlayDensity.zoneLimit).flatMap(zone => [
         candlesSeries.createPriceLine({
           price: zone.high,
-          color: zone.kind === "demand" ? "rgba(16,185,129,0.5)" : "rgba(251,113,133,0.5)",
+          color: zone.kind === "demand" ? layerColor("demand", "zones") : layerColor("supply", "zones"),
           lineWidth: 1,
           lineStyle: LineStyle.Dotted,
           axisLabelVisible: overlayDensity.showZoneAxisLabels,
@@ -624,7 +633,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         }),
         candlesSeries.createPriceLine({
           price: zone.low,
-          color: zone.kind === "demand" ? "rgba(16,185,129,0.3)" : "rgba(251,113,133,0.3)",
+          color: zone.kind === "demand" ? layerColor("demand", "zones") : layerColor("supply", "zones"),
           lineWidth: 1,
           lineStyle: LineStyle.Dotted,
           axisLabelVisible: false,
@@ -636,7 +645,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       ? structure.events.map(event => ({
         time: event.time as Time,
         position: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? "belowBar" : "aboveBar",
-        color: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? "#34d399" : "#fb7185",
+        color: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? layerColor("ictBullish", "signals") : layerColor("ictBearish", "signals"),
         shape: event.kind === "bullish-breakout" || event.kind === "bullish-reversal" ? "arrowUp" : "arrowDown",
         text: event.kind === "bullish-breakout" ? "اختراق" : event.kind === "bearish-breakdown" ? "كسر" : "انعكاس",
       }))
@@ -645,7 +654,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     if (confluence.enabled) {
       if (showIctTrend) {
         decorationsRef.current.indicatorLines = confluenceResult.lines.map(line => {
-          const series = chart.addSeries(LineSeries, { color: line.color, lineWidth: line.id === "ema-slow" ? 2 : 1, priceLineVisible: false, lastValueVisible: false });
+          const series = chart.addSeries(LineSeries, { color: layerColor("ictTrend", "trend"), lineWidth: line.id === "ema-slow" ? 2 : 1, priceLineVisible: false, lastValueVisible: false });
           series.setData(line.points.map(point => ({ time: point.time as Time, value: point.value })));
           return series;
         });
@@ -654,7 +663,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       if (showIctLiquidity) {
         decorationsRef.current.levelLines.push(...selectMostRecentOverlays(confluenceResult.levels, overlayDensity.levelLimit).map(level => candlesSeries.createPriceLine({
           price: level.price,
-          color: level.kind === "sell-side-liquidity" ? "rgba(34,211,238,0.62)" : "rgba(232,121,249,0.62)",
+          color: level.kind === "sell-side-liquidity" ? layerColor("sellLiquidity", "levels") : layerColor("buyLiquidity", "levels"),
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           axisLabelVisible: true,
@@ -665,7 +674,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       if (showIctZones) {
         decorationsRef.current.zoneLines.push(...selectMostRecentOverlays(confluenceResult.zones, overlayDensity.zoneLimit).flatMap(zone => {
           const bullish = zone.direction === "bullish";
-          const color = zone.kind.endsWith("fvg") ? (bullish ? "rgba(59,130,246,0.56)" : "rgba(168,85,247,0.56)") : (bullish ? "rgba(20,184,166,0.62)" : "rgba(239,68,68,0.62)");
+          const color = bullish ? layerColor("ictBullish", "zones") : layerColor("ictBearish", "zones");
           return [
             candlesSeries.createPriceLine({ price: zone.high, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: overlayDensity.showZoneAxisLabels, title: zone.label }),
             candlesSeries.createPriceLine({ price: zone.low, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false }),
@@ -680,14 +689,14 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
         const eventMarkers: SeriesMarker<Time>[] = confluenceResult.events.slice(-maxEvents).filter(event => (event.kind.includes("sweep") ? showIctLiquidity : showIctStructure)).map(event => ({
           time: event.time as Time,
           position: event.direction === "bullish" ? "belowBar" : "aboveBar",
-          color: event.direction === "bullish" ? "#22d3ee" : "#f472b6",
+          color: event.direction === "bullish" ? layerColor("ictBullish", "signals") : layerColor("ictBearish", "signals"),
           shape: event.direction === "bullish" ? "arrowUp" : "arrowDown",
           text: event.label,
         }));
         const signalMarkers: SeriesMarker<Time>[] = showIctSignals ? confluenceResult.signals.slice(-maxEvents).map(signal => ({
           time: signal.time as Time,
           position: signal.direction === "bullish" ? "belowBar" : "aboveBar",
-          color: signal.direction === "bullish" ? "#22c55e" : "#ef4444",
+          color: signal.direction === "bullish" ? layerColor("ictBullish", "signals") : layerColor("ictBearish", "signals"),
           shape: signal.direction === "bullish" ? "arrowUp" : "arrowDown",
           text: signal.label,
         })) : [];
@@ -702,7 +711,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       return {
         time: nearest.time as Time,
         position: bearish ? "aboveBar" : "belowBar",
-        color: bearish ? "#fb7185" : "#38bdf8",
+        color: bearish ? layerColor("ictBearish", "signals") : layerColor("ictBullish", "signals"),
         shape: bearish ? "arrowDown" : "arrowUp",
         text: `إشارة محفوظة · ${signal.recommendation}`,
       };
@@ -714,7 +723,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
     setHasVolume(hasVol);
     if (showLegacyVolume && hasVol) {
       overlays.volume.setData(
-        data.map((c, i) => ({ time: c.time as Time, value: c.volume ?? 0, color: c.close >= c.open ? "rgba(22,163,74,0.45)" : "rgba(220,38,38,0.45)" })),
+        data.map(c => ({ time: c.time as Time, value: c.volume ?? 0, color: c.close >= c.open ? layerColor("volumeUp", "volume") : layerColor("volumeDown", "volume") })),
       );
       overlays.volume.applyOptions({ visible: true });
       candlesSeries.applyOptions({ priceScaleId: "right" });
@@ -723,7 +732,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
       overlays.volume.applyOptions({ visible: false });
     }
 
-  }, [stableKey, chartCandles, chartWidth, confluenceResult, exchange, preferences.confluenceIct, proposedRiskLevels, savedSignalsQuery.data, showIctLiquidity, showIctSignals, showIctStructure, showIctTrend, showIctZones, showLegacyEma, showLegacyEvents, showLegacyLevels, showLegacySma, showLegacyVolume, showLegacyZones, symbol]);
+  }, [stableKey, chartCandles, chartWidth, confluenceResult, exchange, preferences.confluenceIct, preferences.layerStyles, proposedRiskLevels, savedSignalsQuery.data, showIctLiquidity, showIctSignals, showIctStructure, showIctTrend, showIctZones, showLegacyEma, showLegacyEvents, showLegacyLevels, showLegacySma, showLegacyVolume, showLegacyZones, symbol]);
 
   // لا نعيد ضبط زوم/تمرير المستخدم مع بث سعر حي أو تبديل طبقات المؤشر.
   // يطبّق fitContent فقط بعد وصول بيانات الرمز أو البورصة أو الإطار الجديد.
@@ -766,6 +775,21 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
   };
   const updateConfluenceSetting = <Key extends keyof ConfluenceIctSettings>(key: Key, value: ConfluenceIctSettings[Key]) => {
     updateConfluence({ settings: { ...preferences.confluenceIct.settings, [key]: value } });
+  };
+  const updateLayerColor = (key: ChartLayerColorKey, color: string) => {
+    const next = { ...preferences, layerStyles: { ...preferences.layerStyles, colors: { ...preferences.layerStyles.colors, [key]: color } } };
+    setPreferences(next);
+    saveChartPreferences.mutate(next);
+  };
+  const updateLayerOpacity = (key: ChartLayerOpacityKey, opacity: number) => {
+    const next = { ...preferences, layerStyles: { ...preferences.layerStyles, opacity: { ...preferences.layerStyles.opacity, [key]: opacity } } };
+    setPreferences(next);
+    saveChartPreferences.mutate(next);
+  };
+  const resetLayerStyles = () => {
+    const next = { ...preferences, layerStyles: { colors: { ...DEFAULT_CHART_LAYER_STYLES.colors }, opacity: { ...DEFAULT_CHART_LAYER_STYLES.opacity } } };
+    setPreferences(next);
+    saveChartPreferences.mutate(next);
   };
   const liveProvider = exchange.toUpperCase() === "BINANCE" ? "binance" : "twelve-data";
   const livePresentation = describeLiveProviderStatus(liveStatus, liveProvider);
@@ -841,6 +865,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
                   </DropdownMenuCheckboxItem>
                 ))}
                 <DropdownMenuSeparator className="bg-white/[0.1]" />
+                <DropdownMenuItem onSelect={() => setShowLayerStyleSettings(open => !open)} className="min-h-10 rounded-md text-xs text-sky-200 focus:bg-sky-400/10 focus:text-sky-100">
+                  {showLayerStyleSettings ? "إخفاء مظهر الطبقات" : "ألوان وشفافية الطبقات"}
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setShowConfluenceSettings(open => !open)} className="min-h-10 rounded-md text-xs text-primary focus:bg-primary/10 focus:text-primary">
                   {showConfluenceSettings ? "إخفاء إعدادات ICT" : "إعدادات ICT"}
                 </DropdownMenuItem>
@@ -849,6 +876,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <button type="button" onClick={() => setShowConfluenceSettings(open => !open)} className="hidden min-h-10 rounded-lg border border-primary/25 bg-primary/[0.08] px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/[0.14] sm:inline-flex sm:items-center">
               {showConfluenceSettings ? "إخفاء إعدادات ICT" : "إعدادات ICT"}
             </button>
+            <button type="button" onClick={() => setShowLayerStyleSettings(open => !open)} className={`hidden min-h-10 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors sm:inline-flex ${showLayerStyleSettings ? "border-sky-300/30 bg-sky-400/10 text-sky-100" : "border-sky-400/20 bg-sky-400/[0.06] text-sky-200 hover:bg-sky-400/[0.12]"}`}><Paintbrush className="size-3.5" /> {showLayerStyleSettings ? "إخفاء المظهر" : "مظهر الطبقات"}</button>
             <button type="button" onClick={togglePriceScaleMode} aria-pressed={preferences.priceScaleMode === "logarithmic"} title="تبديل المقياس اللوغاريتمي" className={`inline-flex min-h-10 items-center justify-center rounded-lg border px-3 text-xs font-medium transition-colors ${preferences.priceScaleMode === "logarithmic" ? "border-primary/35 bg-primary/15 text-primary" : "border-white/[0.12] bg-white/[0.04] text-muted-foreground hover:text-foreground"}`}>
               Log
             </button>
@@ -881,6 +909,7 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
             <label className="grid gap-1.5"><IctSettingLabel label="حد تأكيد ICT" help={ICT_CONFIRMATION_TOOLTIPS.threshold} /><input type="number" min="1" max={ICT_MAX_SCORE} value={preferences.confluenceIct.settings.ictConfirmThreshold} onChange={event => updateConfluenceSetting("ictConfirmThreshold", Number(event.target.value))} disabled={preferences.confluenceIct.settings.mode === "scalping" || !preferences.confluenceIct.settings.ictConfirmMode} className="h-9 rounded-md border border-white/[0.1] bg-black/30 px-2 font-mono text-foreground disabled:opacity-45" /></label>
           </div>
         ) : null}
+        {showLayerStyleSettings ? <ChartLayerStylePanel styles={preferences.layerStyles} onColorChange={updateLayerColor} onOpacityChange={updateLayerOpacity} onReset={resetLayerStyles} /> : null}
         <div className={`relative overflow-hidden rounded-xl ${isChartFullscreen ? "min-h-0 flex-1" : "h-[340px] min-h-[260px] sm:h-[440px] lg:h-[520px]"}`}>
           <div ref={containerRef} className="h-full w-full" />
           {exchange.toUpperCase() === "BINANCE" && liveCandle ? (

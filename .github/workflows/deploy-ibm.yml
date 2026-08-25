@@ -38,6 +38,14 @@ jobs:
           JWT_SECRET: ci-test-session-secret-not-for-production
         run: pnpm test
 
+      - name: Install Chromium for mobile browser checks
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run mobile browser checks
+        env:
+          JWT_SECRET: ci-test-session-secret-not-for-production
+        run: pnpm test:e2e:mobile
+
       - name: Check TypeScript
         run: pnpm check
 

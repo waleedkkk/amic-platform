@@ -17,8 +17,8 @@ function directionLabel(direction: "bullish" | "bearish") {
   return direction === "bullish" ? "صاعد" : "هابط";
 }
 
-export function ConfluenceBreakdownPanel({ symbol, exchange, interval = "60m" }: { symbol: string; exchange: string; interval?: BreakdownInterval }) {
-  const candlesQuery = trpc.market.candles.useQuery({ symbol, exchange, interval, range: rangeFor(interval), limit: 240 }, { staleTime: 60_000, retry: 1 });
+export function ConfluenceBreakdownPanel({ symbol, exchange, interval = "60m", enabled = true }: { symbol: string; exchange: string; interval?: BreakdownInterval; enabled?: boolean }) {
+  const candlesQuery = trpc.market.candles.useQuery({ symbol, exchange, interval, range: rangeFor(interval), limit: 240 }, { enabled, staleTime: 60_000, retry: 1, refetchOnWindowFocus: false });
   const result = useMemo(() => calculateConfluenceIct(candlesQuery.data?.candles ?? []), [candlesQuery.data?.candles]);
   const signal = result.signals.at(-1);
 

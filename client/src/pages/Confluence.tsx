@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ConfluenceBreakdownPanel } from "@/components/ConfluenceBreakdownPanel";
+import { LazyConfluenceBreakdownPanel } from "@/components/LazyConfluenceBreakdownPanel";
 import { Label } from "@/components/ui/label";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
 import { formatValue, LoadState, MetricCard, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
@@ -66,7 +66,7 @@ export default function Confluence() {
           <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">AGGREGATE READ</p><div className="mt-4"><SignalBadge value={aggregateSignal ?? "لم تُجمع قراءة بعد"} /></div><p className="mt-4 text-sm leading-7 text-muted-foreground">يُظهر هذا الملخص العقد المعياري الثابت للتحليل متعدد الأطر، ويُستخدم كسياق تعليمي لا كتعليمات تداول.</p><p className="mt-3 font-mono text-xs text-muted-foreground">السعر المرجعي: {referencePrice ? formatValue(referencePrice, 6) : "غير متاح"} · {priceSource}</p><Button variant="outline" onClick={() => { void handlePaperTrade(); }} disabled={!data || !referencePrice || saveSignal.isPending} className="mt-5 w-full bg-white/[0.03]">فتح مسودة صفقة ورقية من التوافق</Button></Panel>
           <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">CONTRACT STATUS</p><div className="mt-4 grid gap-3 sm:grid-cols-3"><MetricCard label="الإصدار" value={data?.schemaVersion ?? "—"} detail="عقد توافق الأطر" /><MetricCard label="المصدر" value={data?.source ?? "—"} detail="مصدر التحليل" /><MetricCard label="الدرجة الصافية" value={formatValue(data?.alignment.netScore, 2)} detail={data?.alignment.status ?? "حالة التوافق"} /></div><p className="mt-4 text-xs leading-6 text-muted-foreground">الأطر المتعارضة: {data?.alignment.divergentTimeframes.length ? data.alignment.divergentTimeframes.join("، ") : "لا توجد أطر متعارضة مُبلّغ عنها"}</p>{data?.recommendation.rules.length ? <ul className="mt-4 list-inside list-disc space-y-1 text-sm text-muted-foreground">{data.recommendation.rules.map(rule => <li key={rule}>{rule}</li>)}</ul> : null}</Panel>
         </div>
-        <ConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} />
+        <LazyConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} />
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="تفاصيل الأطر الزمنية المعيارية">
           {frames.map(frame => {
             const item = timeframes[frame];

@@ -31,8 +31,10 @@ import {
   watchlists,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { calculateRealizedPnl } from "./paperCalculations";
+import { calculateRealizedPnl, validatePaperTradePlan } from "./paperCalculations";
 import { createMarketSnapshotL1Cache } from "./marketSnapshotL1";
+import { calculatePriceDeviationPercent, getPaperTradeReferencePrice, PAPER_TRADE_PRICE_DEVIATION_THRESHOLD_PERCENT, type PaperTradeReferencePrice } from "./paperTradeReference";
+import { publishPaperTradeEvent } from "./paperTradeEvents";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 const marketSnapshotL1 = createMarketSnapshotL1Cache(500);
@@ -113,6 +115,12 @@ export async function createPaperTrade(userId: number, input: PaperTradeInput) {
   if (!quantity.isFinite() || !entryPrice.isFinite() || quantity.lte(0) || entryPrice.lte(0)) {
     throw new Error("الكمية وسعر الدخول يجب أن يكونا رقمين موجبين.");
   }
+  validatePaperTradePlan({
+    side: input.side,
+    entryPrice: input.entryPrice,
+    stopLoss: input.stopLoss,
+    takeProfit: input.takeProfit,
+  });
 
   let signalId: number | null = null;
   if (input.signalId !== undefined) {
@@ -141,7 +149,29 @@ export async function createPaperTrade(userId: number, input: PaperTradeInput) {
   return { id: Number(result[0].insertId) };
 }
 
-export async function closeUserPaperTrade(userId: number, tradeId: number, closePriceValue: string) {
+export type CloseUserPaperTradeOptions = {
+  confirmPriceDeviation?: boolean;
+  getReferencePrice?: typeof getPaperTradeReferencePrice;
+};
+
+type PaperTradeCloseContext = {
+  referencePrice: string | null;
+  referenceProvider: PaperTradeReferencePrice["provider"] | null;
+  referenceFetchedAt: string | null;
+  priceDeviationPercent: number | null;
+  priceDeviationWarning: boolean;
+};
+
+export type PaperTradeCloseResult = PaperTradeCloseContext & {
+  id: number;
+  closed: boolean;
+  requiresConfirmation: boolean;
+  exitPrice: string | null;
+  realizedPnl: string | null;
+  closedAt: Date | null;
+};
+
+export async function closeUserPaperTrade(userId: number, tradeId: number, closePriceValue: string, options: CloseUserPaperTradeOptions = {}): Promise<PaperTradeCloseResult> {
   const db = await requireDb();
   const [trade] = await db
     .select()
@@ -154,6 +184,44 @@ export async function closeUserPaperTrade(userId: number, tradeId: number, close
 
   const closePrice = new Decimal(closePriceValue);
   if (!closePrice.isFinite() || closePrice.lte(0)) throw new Error("سعر الإغلاق يجب أن يكون رقمًا موجبًا.");
+
+  const reference = await (options.getReferencePrice ?? getPaperTradeReferencePrice)(trade.symbol, trade.exchange);
+  const priceDeviationPercent = reference ? calculatePriceDeviationPercent(closePrice.toString(), reference.price) : null;
+  const priceDeviationWarning = priceDeviationPercent !== null && priceDeviationPercent > PAPER_TRADE_PRICE_DEVIATION_THRESHOLD_PERCENT;
+  const closeContext: PaperTradeCloseContext = {
+    referencePrice: reference?.price ?? null,
+    referenceProvider: reference?.provider ?? null,
+    referenceFetchedAt: reference?.fetchedAt ?? null,
+    priceDeviationPercent,
+    priceDeviationWarning,
+  };
+
+  if (priceDeviationWarning && !options.confirmPriceDeviation) {
+    publishPaperTradeEvent(userId, {
+      type: "paper_trade.close_deviation_detected",
+      eventId: randomUUID(),
+      tradeId,
+      symbol: trade.symbol,
+      exchange: trade.exchange,
+      requestedClosePrice: closePrice.toFixed(8),
+      referencePrice: closeContext.referencePrice,
+      referenceFetchedAt: closeContext.referenceFetchedAt,
+      deviationPercent: closeContext.priceDeviationPercent,
+      thresholdPercent: PAPER_TRADE_PRICE_DEVIATION_THRESHOLD_PERCENT,
+      provider: closeContext.referenceProvider,
+      observedAt: new Date().toISOString(),
+    });
+
+    return {
+      id: tradeId,
+      closed: false,
+      requiresConfirmation: true,
+      exitPrice: null,
+      realizedPnl: null,
+      closedAt: null,
+      ...closeContext,
+    };
+  }
 
   const realizedPnl = calculateRealizedPnl({
     side: trade.side,
@@ -168,12 +236,38 @@ export async function closeUserPaperTrade(userId: number, tradeId: number, close
     .set({
       status: "closed",
       exitPrice: closePrice.toFixed(8),
+      referencePriceAtClose: reference?.price ?? null,
+      priceDeviationPercent: priceDeviationPercent?.toFixed(4) ?? null,
+      priceDeviationWarning: priceDeviationWarning ? 1 : 0,
       realizedPnl,
       closedAt,
     })
     .where(and(eq(paperTrades.id, tradeId), eq(paperTrades.userId, userId), eq(paperTrades.status, "open")));
 
-  return { id: tradeId, exitPrice: closePrice.toFixed(8), realizedPnl, closedAt };
+  publishPaperTradeEvent(userId, {
+    type: "paper_trade.closed",
+    eventId: randomUUID(),
+    tradeId,
+    symbol: trade.symbol,
+    exchange: trade.exchange,
+    requestedClosePrice: closePrice.toFixed(8),
+    referencePrice: closeContext.referencePrice,
+    referenceFetchedAt: closeContext.referenceFetchedAt,
+    deviationPercent: closeContext.priceDeviationPercent,
+    thresholdPercent: PAPER_TRADE_PRICE_DEVIATION_THRESHOLD_PERCENT,
+    provider: closeContext.referenceProvider,
+    observedAt: new Date().toISOString(),
+  });
+
+  return {
+    id: tradeId,
+    closed: true,
+    requiresConfirmation: false,
+    exitPrice: closePrice.toFixed(8),
+    realizedPnl,
+    closedAt,
+    ...closeContext,
+  };
 }
 
 export async function getUserClosedPaperTrade(userId: number, tradeId: number) {

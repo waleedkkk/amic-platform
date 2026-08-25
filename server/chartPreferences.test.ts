@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CHART_LAYERS, normalizeChartLayers, normalizeChartPreferences } from "../shared/chartPreferences";
+import { DEFAULT_CHART_LAYERS, chartLayerColorWithOpacity, normalizeChartLayerStyles, normalizeChartLayers, normalizeChartPreferences } from "../shared/chartPreferences";
 
 describe("normalizeChartLayers", () => {
   it("يعيد الإعدادات الافتراضية عند تمرير قيمة غير صالحة", () => {
@@ -34,5 +34,19 @@ describe("normalizeChartLayers", () => {
   it("يحفظ ويستعيد تفضيل المقياس اللوغاريتمي مع رفض القيم غير الصالحة", () => {
     expect(normalizeChartPreferences({ priceScaleMode: "logarithmic" }).priceScaleMode).toBe("logarithmic");
     expect(normalizeChartPreferences({ priceScaleMode: "unsupported" }).priceScaleMode).toBe("normal");
+  });
+
+  it("يطبع ألوان وشفافية الطبقات ويرفض اللون أو الشفافية غير الصالحين", () => {
+    expect(normalizeChartLayerStyles({ colors: { sma20: "#ABCDEF", ema12: "red" }, opacity: { trend: 0.4, zones: 10 } })).toMatchObject({
+      colors: { sma20: "#abcdef" },
+      opacity: { trend: 0.4, zones: 1 },
+    });
+    expect(chartLayerColorWithOpacity("#abcdef", 0.4)).toBe("rgba(171,205,239,0.4)");
+  });
+
+  it("يرحل التفضيلات القديمة بإضافة مظهر الطبقات الافتراضي", () => {
+    const result = normalizeChartPreferences({ layers: DEFAULT_CHART_LAYERS });
+    expect(result.layerStyles.colors.sma20).toBe("#f59e0b");
+    expect(result.layerStyles.opacity.volume).toBe(0.45);
   });
 });

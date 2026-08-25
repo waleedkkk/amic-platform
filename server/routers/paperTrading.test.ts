@@ -58,7 +58,7 @@ describe("paperTradingRouter", () => {
 
     await caller.close({ id: 9, closePrice: "101.5" });
 
-    expect(databaseMocks.closeUserPaperTrade).toHaveBeenCalledWith(71, 9, "101.5");
+    expect(databaseMocks.closeUserPaperTrade).toHaveBeenCalledWith(71, 9, "101.5", { confirmPriceDeviation: false });
   });
 
   it("يرفض صيغة كمية غير صالحة قبل الوصول إلى قاعدة البيانات", async () => {
@@ -83,6 +83,19 @@ describe("paperTradingRouter", () => {
     await caller.open({ symbol: "BTCUSDT", exchange: "BINANCE", assetClass: "crypto", side: "long", quantity: "1", entryPrice: "100", signalId: 41 });
 
     expect(databaseMocks.createPaperTrade).toHaveBeenCalledWith(71, expect.objectContaining({ signalId: 41 }));
+  });
+
+  it("يجلب السعر المرجعي للمراكز المفتوحة ويزيل الأصول المكررة", async () => {
+    databaseMocks.listUserPaperTrades.mockResolvedValue([
+      { id: 1, status: "open", symbol: "BTCUSDT", exchange: "BINANCE" },
+      { id: 2, status: "open", symbol: "btcusdt", exchange: "binance" },
+      { id: 3, status: "closed", symbol: "ETHUSDT", exchange: "BINANCE" },
+    ]);
+    candleMocks.getCandleHistoryCached.mockResolvedValue({ provider: "yahoo", fetchedAt: "2026-08-25T10:00:00.000Z", regularMarketPrice: 100, candles: [{ time: 1, close: 99 }] });
+    const caller = paperTradingRouter.createCaller(createAuthenticatedContext(71));
+
+    await expect(caller.referencePrices()).resolves.toEqual([{ symbol: "BTCUSDT", exchange: "BINANCE", reference: { provider: "yahoo", fetchedAt: "2026-08-25T10:00:00.000Z", price: "100.00000000", candleTime: 1 } }]);
+    expect(databaseMocks.listUserPaperTrades).toHaveBeenCalledWith(71);
   });
 
   it("يعيد ملخص الأداء للمستخدم الموثق فقط", async () => {

@@ -6,11 +6,13 @@ import { callTradingViewTool, isTradingViewMcpAvailabilityError, listTradingView
 import { deriveTechnicalAnalysisFromCandles } from "../candleTechnicalFallback";
 import { getTwelveDataLiveQuote } from "../twelveDataStream";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { DEFAULT_CHART_PREFERENCES, normalizeChartPreferences } from "../../shared/chartPreferences";
+import { DEFAULT_CHART_PREFERENCES, chartLayerColorKeys, chartLayerOpacityKeys, normalizeChartPreferences } from "../../shared/chartPreferences";
 import { normalizeMultiTimeframeAnalysis, normalizeTechnicalAnalysis } from "../technicalAnalysis";
 import { fetchCorrelationContext } from "../correlationContext";
 import { correlationFromCandles } from "../../shared/correlation";
 import { DEFAULT_MARKET_PULSE_SECTIONS, MARKET_PULSE_SECTION_KEYS, normalizeMarketPulseSections } from "../../shared/marketPulsePreferences";
+import { calculateConfluenceIct, type IndicatorCandle } from "../../shared/confluenceIct";
+import { calculateUnifiedDecision } from "../../shared/unifiedDecision";
 import { MAX_EXTERNAL_CONTEXT_REFERENCES, normalizeExternalContextReferences } from "../../shared/analysisExternalContext";
 
 const timeframe = z.enum(["5m", "15m", "1h", "4h", "1D", "1W", "1M"]);
@@ -36,6 +38,10 @@ const chartPreferencesInput = z.object({
     signals: z.boolean(),
     summary: z.boolean(),
     settings: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+  }),
+  layerStyles: z.object({
+    colors: z.object(Object.fromEntries(chartLayerColorKeys.map(key => [key, z.string().regex(/^#[\da-fA-F]{6}$/)])) as Record<(typeof chartLayerColorKeys)[number], z.ZodString>),
+    opacity: z.object(Object.fromEntries(chartLayerOpacityKeys.map(key => [key, z.number().min(0.15).max(1)])) as Record<(typeof chartLayerOpacityKeys)[number], z.ZodNumber>),
   }),
   priceScaleMode: z.enum(["normal", "logarithmic"]),
 });
@@ -301,6 +307,47 @@ export const marketRouter = router({
         "MULTI",
         90,
         async () => normalizeMultiTimeframeAnalysis(await callTradingViewTool("multi_timeframe_analysis", input), input),
+      ),
+    ),
+
+  decisionSummary: publicProcedure
+    .input(z.object({ symbol: z.string().min(1).max(32), exchange: z.string().min(1).max(32), timeframe }))
+    .query(({ input }) =>
+      cached(
+        `decision-summary:v1:${input.exchange}:${input.symbol}:${input.timeframe}`,
+        "analysis-decision",
+        input.exchange,
+        input.timeframe,
+        45,
+        async () => {
+          const interval = technicalTimeframeToCandleInterval(input.timeframe);
+          const [core, history, timeframes] = await Promise.all([
+            fetchTechnicalAnalysisWithFallback(input),
+            getCandleHistoryCached(input.symbol, input.exchange, interval, intervalToRange(interval), 250),
+            Promise.resolve()
+              .then(() => callTradingViewTool("multi_timeframe_analysis", input))
+              .then(raw => normalizeMultiTimeframeAnalysis(raw, input))
+              .catch((error: unknown) => {
+                console.warn("[UnifiedDecision] Multi-timeframe context unavailable", { reason: error instanceof Error ? error.message.slice(0, 240) : "سبب غير متاح" });
+                return null;
+              }),
+          ]);
+          const candles: IndicatorCandle[] = history.candles.map((candle: CandleHistory["candles"][number]) => ({
+            time: candle.time,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+            volume: candle.volume,
+          }));
+          const ict = calculateConfluenceIct(candles);
+          return calculateUnifiedDecision({
+            core,
+            ict,
+            timeframes,
+            correlation: core.correlationContext,
+          });
+        },
       ),
     ),
 
