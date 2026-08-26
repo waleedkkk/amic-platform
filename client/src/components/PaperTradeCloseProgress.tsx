@@ -1,11 +1,16 @@
 import React from "react";
-import { CheckCircle2, Circle, CircleHelp, LoaderCircle, MousePointerClick } from "lucide-react";
+import { CheckCircle2, Circle, CircleHelp, LoaderCircle, MousePointerClick, PartyPopper, Sparkles, X } from "lucide-react";
 
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-export type PaperTradeCloseProgressStage = "checking" | "awaiting_confirmation" | "closing";
+export type PaperTradeCloseProgressStage = "checking" | "awaiting_confirmation" | "closing" | "completed";
+
+const completionStage = {
+  title: "اكتمل الإغلاق",
+  detail: "أُغلقت الصفقة الورقية وسُجلت نتيجتها في محفظتك.",
+};
 
 const stages = [
   {
@@ -32,6 +37,7 @@ const progressByStage: Record<PaperTradeCloseProgressStage, number> = {
   checking: 34,
   awaiting_confirmation: 67,
   closing: 92,
+  completed: 100,
 };
 
 function stageIndex(stage: PaperTradeCloseProgressStage) {
@@ -46,34 +52,42 @@ export function PaperTradeCloseProgress({
   stage,
   compact = false,
   className,
+  completionMessage,
+  onCompletionDismiss,
 }: {
   stage: PaperTradeCloseProgressStage;
   compact?: boolean;
   className?: string;
+  completionMessage?: string;
+  onCompletionDismiss?: () => void;
 }) {
+  const isCompleted = stage === "completed";
   const activeIndex = stageIndex(stage);
-  const activeStage = stages[activeIndex];
+  const activeStage = isCompleted ? completionStage : stages[activeIndex];
 
   return (
     <section
       aria-label="تقدم إغلاق الصفقة الورقية"
       aria-live="polite"
-      className={cn("rounded-xl border border-sky-400/20 bg-sky-400/[0.06] p-3 transition-[border-color,background-color,box-shadow] duration-300 motion-reduce:transition-none", className)}
+      className={cn("relative overflow-hidden rounded-xl border border-sky-400/20 bg-sky-400/[0.06] p-3 transition-[border-color,background-color,box-shadow] duration-300 motion-reduce:transition-none", isCompleted && "border-emerald-300/45 bg-emerald-400/[0.10] shadow-[0_0_0_1px_rgba(110,231,183,0.08),0_12px_32px_rgba(16,185,129,0.14)]", className)}
     >
+      {isCompleted ? <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden"><div className="absolute -right-5 -top-7 size-24 rounded-full bg-emerald-300/20 blur-xl motion-safe:animate-pulse" /><div className="absolute left-[14%] top-3 size-2 rounded-full bg-amber-200/80 motion-safe:animate-ping" /><Sparkles className="absolute left-[8%] top-5 size-4 text-amber-200 motion-safe:animate-pulse" /><Sparkles className="absolute right-[24%] top-2 size-3 text-emerald-100 motion-safe:animate-pulse" /></div> : null}
       <div key={stage} className="flex items-start justify-between gap-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200">
-        <div className="min-w-0">
+        <div className="relative min-w-0">
           <p className="text-sm font-semibold text-sky-100">{activeStage.title}</p>
-          <p className="mt-1 text-xs leading-5 text-sky-100/75">{activeStage.detail}</p>
+          <p className={cn("mt-1 text-xs leading-5 text-sky-100/75", isCompleted && "text-emerald-50/85")}>{activeStage.detail}</p>
         </div>
-        <span key={`${stage}-percent`} className="shrink-0 font-mono text-xs text-sky-200 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200">{progressByStage[stage]}%</span>
+        <span key={`${stage}-percent`} className={cn("relative shrink-0 font-mono text-xs text-sky-200 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200", isCompleted && "font-semibold text-emerald-100")}>{progressByStage[stage]}%</span>
       </div>
 
-      <Progress value={progressByStage[stage]} className="mt-3 h-1.5 bg-sky-400/15 [&_[data-slot=progress-indicator]]:bg-sky-300 [&_[data-slot=progress-indicator]]:duration-500 [&_[data-slot=progress-indicator]]:ease-out motion-reduce:[&_[data-slot=progress-indicator]]:transition-none" />
+      <Progress value={progressByStage[stage]} className={cn("relative mt-3 h-1.5 bg-sky-400/15 [&_[data-slot=progress-indicator]]:bg-sky-300 [&_[data-slot=progress-indicator]]:duration-500 [&_[data-slot=progress-indicator]]:ease-out motion-reduce:[&_[data-slot=progress-indicator]]:transition-none", isCompleted && "bg-emerald-300/15 [&_[data-slot=progress-indicator]]:bg-emerald-300")} />
+
+      {isCompleted ? <div role="status" className="relative mt-3 flex items-start gap-3 rounded-lg border border-emerald-200/25 bg-emerald-300/[0.10] p-3 text-emerald-50 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-300"><span className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-200/15 text-emerald-100"><span aria-hidden="true" className="absolute inset-0 rounded-full border border-emerald-100/30 motion-safe:animate-ping" /><PartyPopper className="relative size-4 motion-safe:animate-pulse" /></span><div className="min-w-0"><p className="text-sm font-semibold">نجاح: أُغلقت الصفقة الورقية</p><p className="mt-1 text-xs leading-5 text-emerald-50/85">{completionMessage ?? "سُجلت النتيجة وحدّثت بيانات محفظتك الورقية."}</p></div>{onCompletionDismiss ? <button type="button" onClick={onCompletionDismiss} aria-label="إخفاء رسالة نجاح الإغلاق" className="mr-auto inline-flex size-7 shrink-0 items-center justify-center rounded-md text-emerald-50/75 transition-[transform,background-color,color] duration-150 hover:bg-emerald-100/15 hover:text-emerald-50 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-100 motion-reduce:transition-none"><X className="size-4" /></button> : null}</div> : null}
 
       <ol className={cn("mt-3 grid gap-2", compact ? "grid-cols-3" : "sm:grid-cols-3")}>
         {stages.map((item, index) => {
-          const isCurrent = index === activeIndex;
-          const isComplete = index < activeIndex;
+          const isCurrent = !isCompleted && index === activeIndex;
+          const isComplete = isCompleted || index < activeIndex;
 
           return (
             <li key={item.id} className="min-w-0">

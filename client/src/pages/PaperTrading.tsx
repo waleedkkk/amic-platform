@@ -40,6 +40,12 @@ type PendingCloseConfirmation = {
   priceDeviationPercent: number;
 };
 
+type CloseSuccess = {
+  tradeId: number;
+  symbol: string;
+  realizedPnl: number | string | null;
+};
+
 function paperTradeAssetKey(symbol: string, exchange: string) {
   return `${exchange.trim().toUpperCase()}:${symbol.trim().toUpperCase()}`;
 }
@@ -62,6 +68,7 @@ export default function PaperTrading() {
   const [closePrices, setClosePrices] = useState<Record<number, string>>({});
   const [pendingClose, setPendingClose] = useState<PendingCloseConfirmation | null>(null);
   const [closeProgress, setCloseProgress] = useState<{ tradeId: number; stage: PaperTradeCloseProgressStage } | null>(null);
+  const [closeSuccess, setCloseSuccess] = useState<CloseSuccess | null>(null);
   const utils = trpc.useUtils();
   const trades = trpc.paperTrading.list.useQuery();
   const referencePrices = trpc.paperTrading.referencePrices.useQuery(undefined, { staleTime: 30_000, refetchOnWindowFocus: true });
@@ -100,6 +107,8 @@ export default function PaperTrading() {
       }
       setPendingClose(null);
       setCloseProgress(null);
+      const closedTrade = openTrades.find(item => item.id === result.id);
+      setCloseSuccess({ tradeId: result.id, symbol: closedTrade?.symbol ?? "الصفقة", realizedPnl: result.realizedPnl });
       toast.success(`أُغلقت الصفقة. الربح/الخسارة المحققة: ${formatValue(result.realizedPnl, 4)}. يمكنك طلب نقد تعليمي اختياري من صفحة نقد الصفقات.`);
       refreshTrades();
     },
@@ -112,6 +121,7 @@ export default function PaperTrading() {
   const requestClose = (tradeId: number) => {
     const closePrice = closePrices[tradeId]?.trim();
     if (!closePrice) return toast.error("أدخل سعر الإغلاق أولًا.");
+    setCloseSuccess(null);
     setCloseProgress({ tradeId, stage: "checking" });
     close.mutate({ id: tradeId, closePrice, confirmPriceDeviation: false });
   };
@@ -171,6 +181,7 @@ export default function PaperTrading() {
 
   return <>
     <PageHeading eyebrow="PAPER PORTFOLIO" title="التداول الورقي" description="افتح وأغلق صفقات محاكاة داخل حسابك. تُعزل المراكز والإشارات لكل مستخدم، ولا تُرسل أي أوامر إلى وسيط حقيقي." action={<PaperTradeAlertCenter alerts={alerts} status={paperTradeSocketStatus} onDismiss={dismissAlert} onClear={clearAlerts} onSelect={handleAlertSelect} />} />
+    {closeSuccess ? <PaperTradeCloseProgress stage="completed" completionMessage={`أُغلقت ${closeSuccess.symbol} بنجاح. الربح/الخسارة المحققة: ${formatValue(closeSuccess.realizedPnl, 4)}.`} onCompletionDismiss={() => setCloseSuccess(null)} className="mb-6" /> : null}
     <div className="mb-6 grid gap-3 sm:grid-cols-4">
       {[["إجمالي الصفقات", summary.data?.totalTrades ?? "—"], ["المفتوحة", summary.data?.openTrades ?? "—"], ["نسبة النجاح", summary.data?.winRate === null || summary.data?.winRate === undefined ? "—" : `${summary.data.winRate}%`], ["الربح/الخسارة المحققة", summary.data ? formatValue(summary.data.realizedPnl, 5) : "—"]].map(([label, value]) => <Panel key={String(label)} className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><ChartNoAxesCombined className="size-3.5 text-primary" />{label}</div><p className="mt-2 font-mono text-lg">{value}</p></Panel>)}
     </div>

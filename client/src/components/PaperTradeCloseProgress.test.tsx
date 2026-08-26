@@ -45,4 +45,14 @@ describe("PaperTradeCloseProgress", () => {
     expect(trigger.getAttribute("data-state")).toContain("open");
     expect(trigger.getAttribute("aria-describedby")).toBeTruthy();
   });
+
+  it("يعرض نجاح الإغلاق عند الوصول إلى 100% ويجعل كل المراحل مكتملة", () => {
+    render(<PaperTradeCloseProgress stage="completed" completionMessage="أُغلقت BTCUSDT بنجاح." onCompletionDismiss={() => undefined} />);
+
+    expect(screen.getByText("100%")).toBeTruthy();
+    expect(screen.getByText("نجاح: أُغلقت الصفقة الورقية")).toBeTruthy();
+    expect(screen.getByText("أُغلقت BTCUSDT بنجاح.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "إخفاء رسالة نجاح الإغلاق" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /شرح مرحلة/ })).toHaveLength(3);
+  });
 });
