@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Panel } from "@/components/market-ui";
+import { AdminAiUsageMonitor } from "@/components/AdminAiUsageMonitor";
 import { trpc } from "@/lib/trpc";
 import { aiProviderDefinitions, aiProviderIds, type AiProviderId } from "@shared/aiProviders";
 import { Activity, Check, CheckCircle2, ChevronDown, EyeOff, KeyRound, Loader2, RefreshCw, ShieldAlert, Trash2, Zap } from "lucide-react";
@@ -247,6 +248,7 @@ export function AdminAiProviderSettings() {
 
   return (
     <section className="space-y-4">
+      <AdminAiUsageMonitor />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex items-center gap-2"><KeyRound className="size-4 text-primary" /><h2 className="text-lg font-semibold">ربط نماذج الذكاء الاصطناعي</h2></div>

@@ -9,6 +9,7 @@ const memoryMocks = vi.hoisted(() => ({
   appendUserAssistantMemory: vi.fn(),
   clearUserAssistantMemory: vi.fn(),
   getUserAssistantMemory: vi.fn(),
+  recordAiModelUsage: vi.fn(),
   setUserAssistantMemoryEnabled: vi.fn(),
 }));
 
@@ -71,6 +72,7 @@ describe("aiRouter.explain مع أدوات السوق", () => {
     providerMocks.invokeConfiguredProvider.mockResolvedValue(null);
     memoryMocks.getUserAssistantMemory.mockResolvedValue({ enabled: false, messages: [] });
     memoryMocks.appendUserAssistantMemory.mockResolvedValue(undefined);
+    memoryMocks.recordAiModelUsage.mockResolvedValue(undefined);
   });
 
   it("يعيد إجابة عادية بلا استدعاء MCP ويحافظ على سياق السوق في رسالة النظام", async () => {

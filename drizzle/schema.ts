@@ -154,6 +154,24 @@ export const aiProviderSettings = mysqlTable(
   }),
 );
 
+/** أحداث استخدام مجردة؛ لا تحفظ نص المحادثة أو المفاتيح أو هوية المستخدم. */
+export const aiModelUsageEvents = mysqlTable(
+  "aiModelUsageEvents",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    model: varchar("model", { length: 128 }).notNull(),
+    inputTokens: int("inputTokens"),
+    outputTokens: int("outputTokens"),
+    totalTokens: int("totalTokens"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    createdLookup: index("ai_model_usage_created_idx").on(table.createdAt),
+    modelCreatedLookup: index("ai_model_usage_provider_model_created_idx").on(table.provider, table.model, table.createdAt),
+  }),
+);
+
 export const aiMemorySettings = mysqlTable("aiMemorySettings", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   enabled: int("enabled").default(0).notNull(),
@@ -354,6 +372,7 @@ export type InsertPaperTrade = typeof paperTrades.$inferInsert;
 export type SavedSignal = typeof savedSignals.$inferSelect;
 export type InsertSavedSignal = typeof savedSignals.$inferInsert;
 export type AiProviderSetting = typeof aiProviderSettings.$inferSelect;
+export type AiModelUsageEvent = typeof aiModelUsageEvents.$inferSelect;
 export type AiConversationMessage = typeof aiConversationMessages.$inferSelect;
 export type MetalAlert = typeof metalAlerts.$inferSelect;
 export type StructureAlert = typeof structureAlerts.$inferSelect;

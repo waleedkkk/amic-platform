@@ -16,6 +16,7 @@ import {
   clearUserAssistantMemory,
   getUserAssistantMemory,
   setUserAssistantMemoryEnabled,
+  recordAiModelUsage,
 } from "../db";
 
 const message = z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(4_000) });
@@ -81,6 +82,13 @@ export async function runMcpAssistedConversation(initialMessages: Message[]) {
       messages: conversation,
       tools: assistantMcpTools,
       toolChoice: "auto",
+    });
+    await recordAiModelUsage({
+      provider: "manus",
+      model: response.model || "gpt-5-mini",
+      inputTokens: response.usage?.prompt_tokens ?? null,
+      outputTokens: response.usage?.completion_tokens ?? null,
+      totalTokens: response.usage?.total_tokens ?? null,
     });
     const responseMessage = response.choices[0]?.message;
     const content = textContent(responseMessage?.content);

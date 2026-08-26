@@ -3,7 +3,7 @@ import { z } from "zod";
 import { aiProviderSettings } from "../../drizzle/schema";
 import { decryptProviderKey, encryptProviderKey, getKeyHint } from "../aiProviderCrypto";
 import { listProviderModels, verifyProviderConnection } from "../aiProviderVerifier";
-import { getDb } from "../db";
+import { getAiModelUsageSummary, getDb } from "../db";
 import { adminProcedure, router } from "../_core/trpc";
 import { listTradingViewTools } from "../mcpClient";
 import { aiProviderDefinitions, aiProviderIds } from "../../shared/aiProviders";
@@ -46,6 +46,10 @@ export const adminAiRouter = router({
       return { status: "unavailable" as const, toolCount: null, checkedAt };
     }
   }),
+
+  usage: adminProcedure
+    .input(z.object({ periodDays: z.union([z.literal(7), z.literal(30)]).default(7) }))
+    .query(({ input }) => getAiModelUsageSummary(input.periodDays)),
 
   testConnection: adminProcedure
     .input(z.object({ provider: providerSchema, model: z.string().trim().min(2).max(128), apiKey: z.string().trim().min(8).max(1_000), customBaseUrl: z.string().trim().max(512).optional() }))

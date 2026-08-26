@@ -10,6 +10,7 @@ import { TimeframeAlignmentPanel } from "@/components/TimeframeAlignmentPanel";
 import { ExternalContextCards } from "@/components/ExternalContextCards";
 import { BinanceOrderFlowContextCard } from "@/components/BinanceOrderFlowContextCard";
 import { CorrelationContextPanel } from "@/components/CorrelationContextPanel";
+import { ContextHelp } from "@/components/ContextHelp";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
 import { formatValue, LoadState, MetricCard, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
 import { createSavedAnalysisPayload, getTechnicalDetailGroups, getTechnicalMetricCards, getUnavailableMetricLabels } from "@/lib/technicalAnalysisViewModel";
@@ -123,7 +124,7 @@ export default function TechnicalAnalysis() {
       <PageHeading
         eyebrow="TECHNICAL LAB"
         title="التحليل الفني"
-        description="اقرأ البنية الفنية لأصل محدد عبر عقد مؤشرات موحّد ثابت، دون اعتماد الواجهة على أسماء مزود البيانات الخام."
+        description="ابدأ باختيار الأصل والإطار، ثم اقرأ ملخص الأدلة والبطاقات، وافتح مسودة ورقية فقط بعد مراجعة المخاطر. لا تعتمد الواجهة على أسماء مزود البيانات الخام."
         action={<Button asChild variant="outline" className="max-w-full whitespace-normal bg-white/[0.03]"><Link href="/confluence">تحليل متعدد الأطر <ChartNoAxesCombined className="mr-2 size-4 shrink-0" /></Link></Button>}
       />
       <Panel className="p-3.5 sm:p-4">
@@ -133,7 +134,7 @@ export default function TechnicalAnalysis() {
             if (entry) setForm(prev => ({ ...prev, exchange: entry.exchange }));
           }} />
           <div><Label>البورصة</Label><Input className="mt-2 bg-white/[0.025] font-mono" value={form.exchange} onChange={event => setForm({ ...form, exchange: event.target.value.toUpperCase() })} /></div>
-          <div><Label>الإطار الزمني</Label><Select value={form.timeframe} onValueChange={value => setForm({ ...form, timeframe: value as (typeof timeframes)[number] })}><SelectTrigger className="mt-2 bg-white/[0.025]"><SelectValue /></SelectTrigger><SelectContent>{timeframes.map(item => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select></div>
+          <div><div className="flex items-center gap-1"><Label>الإطار الزمني</Label><ContextHelp term="الإطار الزمني"><p>هو الفترة التي تلخصها كل شمعة. الإطار الأقصر يوضح الحركة القريبة، بينما يساعد الإطار الأطول على رؤية الاتجاه الأوسع.</p></ContextHelp></div><Select value={form.timeframe} onValueChange={value => setForm({ ...form, timeframe: value as (typeof timeframes)[number] })}><SelectTrigger className="mt-2 bg-white/[0.025]"><SelectValue /></SelectTrigger><SelectContent>{timeframes.map(item => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select></div>
           <div className="flex items-end gap-2"><Button type="submit" className="flex-1">تحليل الرمز <CandleIcon className="mr-2 size-4" /></Button><Button type="button" variant="outline" className="shrink-0" onClick={() => query.refetch()} disabled={query.isFetching} aria-label="تحديث التحليل"><RefreshCw className={query.isFetching ? "size-4 animate-spin" : "size-4"} /></Button></div>
         </form>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-3.5" /><span>{updatedAt ? `آخر تحديث ${updatedAt.toLocaleTimeString("ar-EG")}` : "بانتظار أول تحديث"}</span><span>· {params.exchange.toUpperCase() === "BINANCE" ? "التحليل يتحدث دوريًا؛ أما الشارت فيحدّث الشمعة الجارية عبر WebSocket." : "تُحدَّث البيانات تلقائيًا كل دقيقة وقد تكون مؤجلة أو مخزنة مؤقتًا."}</span></div>
@@ -167,7 +168,7 @@ export default function TechnicalAnalysis() {
           </section> : null}
 
           <div className="mt-6 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-            <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">SIGNAL READOUT</p><div className="mt-4 flex flex-wrap items-center gap-3"><SignalBadge value={recommendation} /><span className="text-sm text-muted-foreground">مخرجات معيارية موحدة من مزود التحليل الحالي للأصل والإطار المحددين.</span></div><div className="mt-6 grid gap-3 sm:grid-cols-3">{metrics.slice(1).map(metric => <div key={metric.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4"><p className="text-xs uppercase tracking-wider text-muted-foreground">{metric.id}</p><p className="mt-3 font-mono text-lg">{formatValue(metric.value, metric.digits)}</p></div>)}</div></Panel>
+            <Panel><div className="flex items-center gap-1"><p className="text-xs font-semibold tracking-[0.13em] text-primary">ملخص القراءة</p><ContextHelp term="ملخص القراءة"><p>يلخّص اتجاه القراءة للمصدر والإطار المحددين. ارجع إلى بطاقات المؤشرات أعلاه عند الحاجة إلى قيم RSI أو MACD أو Bollinger التفصيلية.</p><span /></ContextHelp></div><div className="mt-4 flex flex-wrap items-center gap-3"><SignalBadge value={recommendation} /><span className="text-sm text-muted-foreground">مخرجات معيارية موحدة من مزود التحليل الحالي للأصل والإطار المحددين.</span></div><p className="mt-5 text-sm leading-6 text-muted-foreground">تجنب تكرار نفس الأرقام هنا: اقرأ السعر والمؤشرات من البطاقات أعلى المخطط، ثم استخدم هذه الخلاصة لتحديد ما إذا كنت ستوثق القراءة أو تراجعها لاحقًا.</p></Panel>
             <Panel><p className="text-xs font-semibold tracking-[0.13em] text-primary">KEEP THE CONTEXT</p><h2 className="mt-3 text-xl font-semibold">حفظ الإشارة أو تحويلها</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">يحفظ السجل نسخة ذات إصدار من عقد التحليل مع سياق المخطط. لا تُرسل أي أوامر حقيقية ولا تمثل القيم الافتراضية توصية استثمارية.</p><div className="mt-6 grid gap-2"><Button onClick={handleSave} disabled={saveSignal.isPending || !data}><BookmarkPlus className="ml-2 size-4" />حفظ في سجل الإشارات</Button><Button variant="outline" onClick={() => { void handlePaperTrade(); }} disabled={!data || saveSignal.isPending} className="bg-white/[0.03]">فتح مسودة صفقة ورقية</Button></div></Panel>
           </div>
         </LoadState>

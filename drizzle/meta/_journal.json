@@ -169,6 +169,13 @@
       "when": 1787615740263,
       "tag": "0023_last_sprite",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1787737747426,
+      "tag": "0024_gifted_power_man",
+      "breakpoints": true
     }
   ]
 }

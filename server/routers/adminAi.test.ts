@@ -25,4 +25,10 @@ describe("adminAiRouter authorization", () => {
 
     await expect(caller.listModels({ provider: "openrouter" })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("يرفض مراقبة استهلاك النماذج لغير المدير", async () => {
+    const caller = adminAiRouter.createCaller({ user: { id: 7, role: "user" } } as never);
+
+    await expect(caller.usage({ periodDays: 7 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

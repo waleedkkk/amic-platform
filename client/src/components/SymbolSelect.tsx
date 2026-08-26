@@ -1,5 +1,6 @@
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ContextHelp } from "@/components/ContextHelp";
 import { cn } from "@/lib/utils";
 
 /** قائمة رموز مقترحة مقسمة حسب الفئة — الرمز والبورصة المقابلة له. */
@@ -96,7 +97,12 @@ export function SymbolSelect({ label, value, onChange, className, onSelect, cust
   const suggestedExchange = suggested?.exchange ?? "";
   return (
     <div className={className}>
-      <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{label}</label>
+      <div className="flex items-center gap-1">
+        <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{label}</label>
+        <ContextHelp term="الرمز والبورصة" title="اختيار الأصل">
+          <p>الرمز هو اختصار الأصل الذي تريد قراءته، مثل BTCUSDT أو XAUUSD. البورصة تحدد السوق أو مصدر التسعير المرتبط به.</p>
+        </ContextHelp>
+      </div>
       <div className="mt-2 flex flex-col gap-2 min-[420px]:flex-row">
         <Select value={isSuggested ? value : "__custom__"} onValueChange={next => { if (next !== "__custom__") { onChange(next); onSelect?.(next); } }}>
           <SelectTrigger className="min-w-0 flex-1 bg-white/[0.025] font-mono">

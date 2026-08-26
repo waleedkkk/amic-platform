@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import {
   InsertSavedSignal,
   analysisExternalContextPreferences,
+  aiModelUsageEvents,
   aiProviderSettings,
   aiConversationMessages,
   aiMemorySettings,
@@ -488,6 +489,66 @@ export async function getAdminOperationsSummary(now = new Date()) {
       activeProvider: activeProvider[0] ?? null,
     },
     cleanup: { registered: Boolean(cleanupTaskUid) },
+  };
+}
+
+export type AiUsageRecordInput = {
+  provider: string;
+  model: string;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+};
+
+/** يسجل بيانات الاستخدام التي أبلغ عنها المزود فقط، من دون محتوى المحادثة أو المفاتيح. */
+export async function recordAiModelUsage(input: AiUsageRecordInput) {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.insert(aiModelUsageEvents).values({
+      provider: input.provider.slice(0, 32),
+      model: input.model.slice(0, 128),
+      inputTokens: input.inputTokens ?? null,
+      outputTokens: input.outputTokens ?? null,
+      totalTokens: input.totalTokens ?? null,
+    });
+  } catch (error) {
+    // لا يجب أن يمنع تعذر التسجيل رد المساعد؛ نحتفظ بتحذير تشخيصي دون بيانات حساسة.
+    console.warn("[AI usage] Failed to record model usage", error instanceof Error ? error.message : "unknown error");
+  }
+}
+
+export async function getAiModelUsageSummary(periodDays: 7 | 30, now = new Date()) {
+  const db = await requireDb();
+  const since = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1_000);
+  const events = await db
+    .select({ provider: aiModelUsageEvents.provider, model: aiModelUsageEvents.model, inputTokens: aiModelUsageEvents.inputTokens, outputTokens: aiModelUsageEvents.outputTokens, totalTokens: aiModelUsageEvents.totalTokens })
+    .from(aiModelUsageEvents)
+    .where(gte(aiModelUsageEvents.createdAt, since));
+
+  const models = new Map<string, { provider: string; model: string; requests: number; reportedUsageRequests: number; inputTokens: number; outputTokens: number; totalTokens: number }>();
+  for (const event of events) {
+    const key = `${event.provider}:${event.model}`;
+    const summary = models.get(key) ?? { provider: event.provider, model: event.model, requests: 0, reportedUsageRequests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    summary.requests += 1;
+    const reported = event.inputTokens !== null || event.outputTokens !== null || event.totalTokens !== null;
+    if (reported) summary.reportedUsageRequests += 1;
+    summary.inputTokens += Number(event.inputTokens ?? 0);
+    summary.outputTokens += Number(event.outputTokens ?? 0);
+    summary.totalTokens += Number(event.totalTokens ?? 0);
+    models.set(key, summary);
+  }
+
+  const byModel = Array.from(models.values()).sort((a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests || a.model.localeCompare(b.model));
+  return {
+    periodDays,
+    since,
+    requests: events.length,
+    reportedUsageRequests: byModel.reduce((total, item) => total + item.reportedUsageRequests, 0),
+    inputTokens: byModel.reduce((total, item) => total + item.inputTokens, 0),
+    outputTokens: byModel.reduce((total, item) => total + item.outputTokens, 0),
+    totalTokens: byModel.reduce((total, item) => total + item.totalTokens, 0),
+    models: byModel,
   };
 }
 

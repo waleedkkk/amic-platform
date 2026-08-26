@@ -4,9 +4,12 @@ import { decryptProviderKey } from "./aiProviderCrypto";
 import { getDb } from "./db";
 import { aiProviderDefinitions, type AiProviderId } from "../shared/aiProviders";
 import { resolveOpenAiBaseUrl } from "./aiProviderBaseUrl";
+import { usageFromAnthropicPayload, usageFromGooglePayload, usageFromOpenAiPayload, type AiReportedUsage } from "./aiUsage";
+import { recordAiModelUsage } from "./db";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 type ProviderName = AiProviderId;
+type ProviderResult = { content: string; usage: AiReportedUsage | null };
 
 function providerError(provider: string, status: number) {
   return new Error(`تعذر الاتصال بمزود ${provider} (رمز الاستجابة ${status}). تحقق من المفتاح واسم النموذج ثم أعد المحاولة.`);
@@ -41,7 +44,7 @@ async function invokeOpenAiCompatible(baseUrl: string, providerLabel: string, ap
     providerLabel,
   );
   const choices = payload.choices as Array<{ message?: { content?: string } }> | undefined;
-  return choices?.[0]?.message?.content?.trim() || "لم يُرجع مزود OpenAI محتوى صالحًا.";
+  return { content: choices?.[0]?.message?.content?.trim() || "لم يُرجع مزود OpenAI محتوى صالحًا.", usage: usageFromOpenAiPayload(payload) } satisfies ProviderResult;
 }
 
 async function invokeAnthropic(apiKey: string, model: string, maxOutputTokens: number, messages: ChatMessage[]) {
@@ -60,7 +63,7 @@ async function invokeAnthropic(apiKey: string, model: string, maxOutputTokens: n
     "Anthropic",
   );
   const content = payload.content as Array<{ type?: string; text?: string }> | undefined;
-  return content?.filter(item => item.type === "text").map(item => item.text ?? "").join("\n").trim() || "لم يُرجع مزود Anthropic محتوى صالحًا.";
+  return { content: content?.filter(item => item.type === "text").map(item => item.text ?? "").join("\n").trim() || "لم يُرجع مزود Anthropic محتوى صالحًا.", usage: usageFromAnthropicPayload(payload) } satisfies ProviderResult;
 }
 
 async function invokeGoogle(apiKey: string, model: string, maxOutputTokens: number, messages: ChatMessage[]) {
@@ -79,7 +82,7 @@ async function invokeGoogle(apiKey: string, model: string, maxOutputTokens: numb
     "Google Gemini",
   );
   const candidates = payload.candidates as Array<{ content?: { parts?: Array<{ text?: string }> } }> | undefined;
-  return candidates?.[0]?.content?.parts?.map(part => part.text ?? "").join("\n").trim() || "لم يُرجع مزود Google Gemini محتوى صالحًا.";
+  return { content: candidates?.[0]?.content?.parts?.map(part => part.text ?? "").join("\n").trim() || "لم يُرجع مزود Google Gemini محتوى صالحًا.", usage: usageFromGooglePayload(payload) } satisfies ProviderResult;
 }
 
 export async function invokeConfiguredProvider(messages: ChatMessage[]) {
@@ -96,18 +99,19 @@ export async function invokeConfiguredProvider(messages: ChatMessage[]) {
   const provider = setting.provider as ProviderName;
   const model = setting.model;
   const maxOutputTokens = setting.maxOutputTokens;
-  let content: string;
+  let result: ProviderResult;
   if (provider === "openai") {
-    content = setting.customBaseUrl
+    result = setting.customBaseUrl
       ? await invokeOpenAiCompatible(resolveOpenAiBaseUrl(provider, setting.customBaseUrl), "OpenAI-compatible", apiKey, model, maxOutputTokens, messages)
       : await invokeOpenAi(apiKey, model, maxOutputTokens, messages);
   }
-  else if (provider === "anthropic") content = await invokeAnthropic(apiKey, model, maxOutputTokens, messages);
-  else if (provider === "google") content = await invokeGoogle(apiKey, model, maxOutputTokens, messages);
+  else if (provider === "anthropic") result = await invokeAnthropic(apiKey, model, maxOutputTokens, messages);
+  else if (provider === "google") result = await invokeGoogle(apiKey, model, maxOutputTokens, messages);
   else if (provider === "openrouter" || provider === "zenmux") {
     const definition = aiProviderDefinitions[provider];
-    content = await invokeOpenAiCompatible(resolveOpenAiBaseUrl(provider, setting.customBaseUrl), definition.name, apiKey, model, maxOutputTokens, messages);
+    result = await invokeOpenAiCompatible(resolveOpenAiBaseUrl(provider, setting.customBaseUrl), definition.name, apiKey, model, maxOutputTokens, messages);
   }
   else throw new Error("مزود الذكاء الاصطناعي المحدد غير مدعوم.");
-  return { content, provider, model };
+  await recordAiModelUsage({ provider, model, ...result.usage });
+  return { content: result.content, provider, model };
 }

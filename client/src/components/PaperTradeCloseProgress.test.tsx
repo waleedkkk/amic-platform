@@ -1,12 +1,12 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PaperTradeCloseProgress } from "./PaperTradeCloseProgress";
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-beforeAll(() => {
+beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class {
     observe() {}
     unobserve() {}
@@ -54,5 +54,30 @@ describe("PaperTradeCloseProgress", () => {
     expect(screen.getByText("أُغلقت BTCUSDT بنجاح.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "إخفاء رسالة نجاح الإغلاق" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /شرح مرحلة/ })).toHaveLength(3);
+  });
+
+  it("يفتح مشاركة النظام للنتيجة عندما تدعمها بيئة المستخدم", async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { share });
+    render(<PaperTradeCloseProgress stage="completed" completionMessage="أُغلقت BTCUSDT بنجاح. الربح/الخسارة المحققة: 12.5." />);
+
+    fireEvent.click(screen.getByRole("button", { name: "مشاركة النتيجة" }));
+
+    await waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({
+      title: "نتيجة تداول ورقي من AMIC",
+      text: expect.stringContaining("BTCUSDT"),
+    })));
+    expect(screen.getByText("فُتحت خيارات المشاركة.")).toBeTruthy();
+  });
+
+  it("ينسخ النتيجة للحافظة عندما لا تتوفر مشاركة النظام", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(<PaperTradeCloseProgress stage="completed" completionMessage="أُغلقت ETHUSDT بنجاح. الربح/الخسارة المحققة: 4." />);
+
+    fireEvent.click(screen.getByRole("button", { name: "مشاركة النتيجة" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining("ETHUSDT")));
+    expect(screen.getByText("نُسخت النتيجة للحافظة.")).toBeTruthy();
   });
 });
