@@ -1,4 +1,4 @@
-export type MarketSnapshotL1Entry = { payload: unknown; expiresAt: number };
+export type MarketSnapshotL1Entry = { payload: unknown; expiresAt: number; cachedAt: number };
 
 /**
  * كاش محلي لعملية Node واحدة. تعدد النسخ قد يكرر جلبًا بسيطًا بين العمليات،
@@ -8,6 +8,11 @@ export function createMarketSnapshotL1Cache(maxEntries = 500) {
   const entries = new Map<string, MarketSnapshotL1Entry>();
 
   function get(key: string, now = Date.now()) {
+    const entry = getEntry(key, now);
+    return entry?.payload;
+  }
+
+  function getEntry(key: string, now = Date.now()) {
     const entry = entries.get(key);
     if (!entry) return undefined;
     if (entry.expiresAt <= now) {
@@ -17,19 +22,20 @@ export function createMarketSnapshotL1Cache(maxEntries = 500) {
     // إعادة الإدراج تجعل الإخلاء البسيط أقرب إلى LRU.
     entries.delete(key);
     entries.set(key, entry);
-    return entry.payload;
+    return entry;
   }
 
-  function set(key: string, payload: unknown, expiresAt: Date | number) {
+  function set(key: string, payload: unknown, expiresAt: Date | number, cachedAt: Date | number = Date.now()) {
     const expiresAtMs = expiresAt instanceof Date ? expiresAt.getTime() : expiresAt;
+    const cachedAtMs = cachedAt instanceof Date ? cachedAt.getTime() : cachedAt;
     entries.delete(key);
     while (entries.size >= maxEntries) {
       const oldestKey = entries.keys().next().value as string | undefined;
       if (!oldestKey) break;
       entries.delete(oldestKey);
     }
-    entries.set(key, { payload, expiresAt: expiresAtMs });
+    entries.set(key, { payload, expiresAt: expiresAtMs, cachedAt: cachedAtMs });
   }
 
-  return { get, set, clear: () => entries.clear(), size: () => entries.size };
+  return { get, getEntry, set, clear: () => entries.clear(), size: () => entries.size };
 }

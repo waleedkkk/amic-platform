@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { getCandleHistoryCached, type CandleHistory, type CandleInterval } from "../candles";
+import { getCandleHistoryCached, getCandleHistoryCachedWithMetadata, type CandleHistory, type CandleInterval } from "../candles";
 import { addUserWatchlistItem, getMarketSnapshot, getUserAnalysisExternalContextPreferences, getUserChartPreferences, getUserMarketPulsePreferences, listUserWatchlist, removeUserWatchlistItem, saveMarketSnapshot, saveUserAnalysisExternalContextPreferences, saveUserChartPreferences, saveUserMarketPulsePreferences } from "../db";
 import { createInFlightRequestCoalescer } from "../cacheCoalescing";
+import { recordCandleCacheMeasurement } from "../marketPerformance";
 import { callTradingViewTool, isTradingViewMcpAvailabilityError, listTradingViewTools, TRADINGVIEW_TOOL_NAMES } from "../mcpClient";
 import { deriveTechnicalAnalysisFromCandles } from "../candleTechnicalFallback";
 import { getTwelveDataLiveQuote } from "../twelveDataStream";
@@ -408,9 +409,17 @@ export const marketRouter = router({
         before: z.number().int().positive().optional(),
       }),
     )
-    .query(({ input }) =>
-      getCandleHistoryCached(input.symbol, input.exchange, input.interval, input.range ?? intervalToRange(input.interval), input.limit, { before: input.before }),
-    ),
+    .query(async ({ input }) => {
+      const startedAt = Date.now();
+      try {
+        const result = await getCandleHistoryCachedWithMetadata(input.symbol, input.exchange, input.interval, input.range ?? intervalToRange(input.interval), input.limit, { before: input.before });
+        recordCandleCacheMeasurement({ cacheStatus: result.cache.cacheStatus, durationMs: Date.now() - startedAt, outcome: "success" });
+        return { ...result.history, cache: result.cache };
+      } catch (error) {
+        recordCandleCacheMeasurement({ cacheStatus: null, durationMs: Date.now() - startedAt, outcome: "error" });
+        throw error;
+      }
+    }),
 
   chartPreferences: router({
     get: protectedProcedure.query(async ({ ctx }) => {

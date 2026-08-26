@@ -11,6 +11,7 @@ import { ExternalContextCards } from "@/components/ExternalContextCards";
 import { BinanceOrderFlowContextCard } from "@/components/BinanceOrderFlowContextCard";
 import { CorrelationContextPanel } from "@/components/CorrelationContextPanel";
 import { ContextHelp } from "@/components/ContextHelp";
+import { DeferredTechnicalPanel } from "@/components/DeferredTechnicalPanel";
 import { SUGGESTED_SYMBOLS, SymbolSelect } from "@/components/SymbolSelect";
 import { formatValue, LoadState, MetricCard, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
 import { createSavedAnalysisPayload, getTechnicalDetailGroups, getTechnicalMetricCards, getUnavailableMetricLabels } from "@/lib/technicalAnalysisViewModel";
@@ -157,10 +158,10 @@ export default function TechnicalAnalysis() {
           </div>
           <PriceChart symbol={params.symbol} exchange={params.exchange} onCrossoverChange={handleCrossoverChange} proposedRiskLevels={chartRiskLevels} />
           <CorrelationContextPanel context={data?.correlationContext} />
-          <TimeframeAlignmentPanel symbol={params.symbol} exchange={params.exchange} atr={data?.indicators.atr.value ?? null} price={price} />
-          <ExternalContextCards symbol={params.symbol} exchange={params.exchange} />
+          <DeferredTechnicalPanel title="توافق الأطر وقياس ATR" description="تُحمّل القراءة المتعددة الأطر عند الاقتراب من هذا القسم أو عند الطلب."><TimeframeAlignmentPanel symbol={params.symbol} exchange={params.exchange} atr={data?.indicators.atr.value ?? null} price={price} /></DeferredTechnicalPanel>
+          <DeferredTechnicalPanel title="السياق الخارجي" description="تُحمّل بطاقات الأصول المرتبطة فقط عند الوصول إليها."><ExternalContextCards symbol={params.symbol} exchange={params.exchange} /></DeferredTechnicalPanel>
           <LazyConfluenceBreakdownPanel symbol={params.symbol} exchange={params.exchange} interval={params.timeframe === "1h" ? "60m" : params.timeframe === "1D" ? "1d" : params.timeframe === "1W" ? "1wk" : params.timeframe} />
-          <SessionHeatmapPanel symbol={params.symbol} exchange={params.exchange} />
+          <DeferredTechnicalPanel title="خريطة نشاط الجلسات" description="تُحمّل بيانات الجلسات التاريخية عند الاقتراب من الخريطة."><SessionHeatmapPanel symbol={params.symbol} exchange={params.exchange} /></DeferredTechnicalPanel>
           {unavailableMetrics.length > 0 ? <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">تعذّر على مزود التحليل تقديم {unavailableMetrics.join("، ")} لهذه القراءة. تبقى بقية بيانات التحليل متاحة، ويمكنك إعادة التحديث أو تجربة إطار آخر.</div> : null}
 
           {detailGroups.length > 0 ? <section className="mt-6 grid gap-4 lg:grid-cols-3" aria-label="تفاصيل المؤشرات المعيارية">

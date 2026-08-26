@@ -35,6 +35,7 @@ const dashboardCopy: Record<AdminOperationsView, { title: string; description: s
 export function AdminOperationsDashboard({ view = "overview" }: { view?: AdminOperationsView }) {
   const utils = trpc.useUtils();
   const overview = trpc.auth.admin.dashboard.overview.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true });
+  const marketPerformance = trpc.auth.admin.dashboard.marketPerformance.useQuery(undefined, { enabled: view === "maintenance", refetchInterval: 60_000, refetchOnWindowFocus: true });
   const cleanup = trpc.auth.admin.dashboard.cleanupExpiredSnapshots.useMutation({
     onSuccess: result => {
       setStatus(result.deleted > 0 ? `أُزيلت ${formatValue(result.deleted, 0)} لقطة منتهية بأمان.` : "لا توجد لقطات مؤهلة للتنظيف الآن.");
@@ -98,6 +99,16 @@ export function AdminOperationsDashboard({ view = "overview" }: { view?: AdminOp
             </div>
           </Panel>
         </div>
+
+        <Panel className="p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold">أداء كاش الشموع</p><p className="mt-1 text-xs leading-5 text-muted-foreground">قياس مجمع للمثيل الحالي فقط: لا يحفظ الرموز أو المستخدمين أو محتوى الطلبات. يُعاد ضبطه عند إعادة تشغيل الخدمة.</p></div><Badge variant="outline" className="border-border/70 bg-card/70">{marketPerformance.data ? "قياس محلي" : "بانتظار بيانات"}</Badge></div>
+          {marketPerformance.isLoading ? <div className="mt-4 text-sm text-muted-foreground">جارٍ تحميل المقاييس…</div> : marketPerformance.error ? <div className="mt-4 text-sm text-rose-200">تعذر تحميل مقاييس الكاش: {marketPerformance.error.message}</div> : marketPerformance.data ? <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="طلبات الشموع" value={formatValue(marketPerformance.data.candles.requests, 0)} detail={`${formatValue(marketPerformance.data.candles.failedRequests, 0)} فشل`} icon={<Activity className="size-4 text-sky-300" />} />
+            <MetricCard label="إصابات الكاش" value={formatValue(marketPerformance.data.candles.cacheHits, 0)} detail={marketPerformance.data.candles.cacheHitRate === null ? "لا توجد طلبات ناجحة بعد" : `${marketPerformance.data.candles.cacheHitRate}% من الطلبات الناجحة`} icon={<DatabaseZap className="size-4 text-emerald-300" />} positive />
+            <MetricCard label="متوسط الاستجابة" value={marketPerformance.data.candles.averageLatencyMs === null ? "—" : `${formatValue(marketPerformance.data.candles.averageLatencyMs, 0)} ms`} detail={`${formatValue(marketPerformance.data.candles.latencySamples, 0)} عينة ضمن المثيل`} icon={<Activity className="size-4 text-violet-300" />} />
+            <MetricCard label="P95 للاستجابة" value={marketPerformance.data.candles.p95LatencyMs === null ? "—" : `${formatValue(marketPerformance.data.candles.p95LatencyMs, 0)} ms`} detail={`${formatValue(marketPerformance.data.candles.freshFetches, 0)} جلب جديد من المصدر`} icon={<DatabaseZap className="size-4 text-amber-200" />} />
+          </div> : null}
+        </Panel>
 
         <Panel className="border-amber-300/15 bg-gradient-to-br from-amber-300/[0.07] to-transparent p-4">
           <div className="flex items-start gap-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-amber-300/10 text-amber-200"><Trash2 className="size-4" /></span><div className="min-w-0"><p className="text-sm font-semibold">تنظيف كاش السوق المنتهي</p><p className="mt-1 text-xs leading-5 text-muted-foreground">إجراء يدوي محدود يحذف لقطات الكاش المنتهية منذ أكثر من 24 ساعة فقط. لا يمس الصفقات أو الإشارات أو حسابات المستخدمين.</p></div></div>

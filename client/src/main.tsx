@@ -7,7 +7,17 @@ import superjson from "superjson";
 import App from "./App";
 import { isExpectedExternalAvailabilityError } from "./lib/apiErrorReporting";
 import "./index.css";
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+      retryDelay: attempt => Math.min(1_000 * 2 ** attempt, 4_000),
+    },
+  },
+});
 queryClient.getQueryCache().subscribe(event => {
   if (event.type === "updated" && event.action.type === "error") {
     const error = event.query.state.error;

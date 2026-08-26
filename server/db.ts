@@ -399,15 +399,28 @@ export async function getPublicSignal(publicShareId: string) {
   return signal ?? null;
 }
 
-export async function getMarketSnapshot(cacheKey: string) {
-  const inMemory = marketSnapshotL1.get(cacheKey);
-  if (inMemory !== undefined) return inMemory;
+export type MarketSnapshotCacheEntry = {
+  payload: unknown;
+  cacheLayer: "memory" | "snapshot";
+  cachedAt: Date;
+  expiresAt: Date;
+};
+
+/** يعيد طبقة الكاش وعمرها دون كشف أي بيانات خاصة بالمستخدم. */
+export async function getMarketSnapshotEntry(cacheKey: string): Promise<MarketSnapshotCacheEntry | undefined> {
+  const inMemory = marketSnapshotL1.getEntry(cacheKey);
+  if (inMemory) return { payload: inMemory.payload, cacheLayer: "memory", cachedAt: new Date(inMemory.cachedAt), expiresAt: new Date(inMemory.expiresAt) };
   const db = await getDb();
   if (!db) return undefined;
   const [snapshot] = await db.select().from(marketSnapshots).where(eq(marketSnapshots.cacheKey, cacheKey)).limit(1);
   if (!snapshot || snapshot.expiresAt <= new Date()) return undefined;
-  marketSnapshotL1.set(cacheKey, snapshot.payload, snapshot.expiresAt);
-  return snapshot.payload;
+  marketSnapshotL1.set(cacheKey, snapshot.payload, snapshot.expiresAt, snapshot.fetchedAt);
+  return { payload: snapshot.payload, cacheLayer: "snapshot", cachedAt: snapshot.fetchedAt, expiresAt: snapshot.expiresAt };
+}
+
+export async function getMarketSnapshot(cacheKey: string) {
+  const entry = await getMarketSnapshotEntry(cacheKey);
+  return entry?.payload;
 }
 
 /** نحتفظ باللقطات المنتهية ليوم إضافي لتسهيل التشخيص قبل التنظيف الدوري. */
@@ -618,11 +631,12 @@ export async function saveMarketSnapshot(input: {
   payload: unknown;
   expiresAt: Date;
 }) {
-  marketSnapshotL1.set(input.cacheKey, input.payload, input.expiresAt);
+  const cachedAt = new Date();
+  marketSnapshotL1.set(input.cacheKey, input.payload, input.expiresAt, cachedAt);
   const db = await getDb();
   if (!db) return;
   await db.insert(marketSnapshots).values(input).onDuplicateKeyUpdate({
-    set: { payload: input.payload, fetchedAt: new Date(), expiresAt: input.expiresAt },
+    set: { payload: input.payload, fetchedAt: cachedAt, expiresAt: input.expiresAt },
   });
 }
 

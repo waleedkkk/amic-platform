@@ -4,7 +4,7 @@
  * Twelve Data هو المصدر الأساسي عند ضبط مفتاحه الخادمي، مع احتياط Yahoo Finance
  * للحفاظ على استمرارية الشارت عند عدم دعم رمز أو تعذر المزود المرخص.
  */
-import { getMarketSnapshot, saveMarketSnapshot } from "./db";
+import { getMarketSnapshot, getMarketSnapshotEntry, saveMarketSnapshot } from "./db";
 import { createInFlightRequestCoalescer } from "./cacheCoalescing";
 
 export type CandleInterval = "1m" | "5m" | "15m" | "30m" | "60m" | "4h" | "1d" | "1wk" | "1mo";
@@ -30,6 +30,16 @@ export type CandleHistory = {
   regularMarketPrice: number | null;
   fetchedAt: string;
 };
+
+export type CandleCacheMetadata = {
+  cacheStatus: "memory" | "snapshot" | "fresh";
+  sourceFetchedAt: string;
+  cachedAt: string;
+  expiresAt: string;
+  isStale: false;
+};
+
+export type CachedCandleHistory = { history: CandleHistory; cache: CandleCacheMetadata };
 
 type MetalCandleFetchers = {
   apiKey?: string;
@@ -349,28 +359,60 @@ export async function getCandleHistoryCached(
   limit?: number,
   optionsOrFetchHistory?: CandleHistoryCacheOptions | typeof fetchCandleHistory,
 ): Promise<CandleHistory> {
+  const result = await getCandleHistoryCachedWithMetadata(symbol, exchange, interval, range, limit, optionsOrFetchHistory);
+  return result.history;
+}
+
+/**
+ * يحافظ على عقد الشموع الحالي ويضيف وصفًا دقيقًا للكاش للمسارات التي تريد عرضه أو قياسه.
+ * لا تستخدم القراءة القديمة هنا؛ لا تسوّق شموعًا متأخرة على أنها حديثة.
+ */
+export async function getCandleHistoryCachedWithMetadata(
+  symbol: string,
+  exchange: string,
+  interval: CandleInterval,
+  range: string,
+  limit?: number,
+  optionsOrFetchHistory?: CandleHistoryCacheOptions | typeof fetchCandleHistory,
+): Promise<CachedCandleHistory> {
   const options = typeof optionsOrFetchHistory === "function" ? { fetchHistory: optionsOrFetchHistory } : optionsOrFetchHistory ?? {};
   const before = options.before;
   const fetchHistory = options.fetchHistory ?? fetchCandleHistory;
   const normalizedLimit = normalizeCandleLimit(limit);
   const beforePart = before && Number.isFinite(before) && before > 0 ? `:before:${Math.floor(before)}` : "";
   const cacheKey = `candles:${exchange}:${symbol}:${interval}:${range}:${normalizedLimit}${beforePart}`;
-  const existing = await getMarketSnapshot(cacheKey);
+  const existing = await getMarketSnapshotEntry(cacheKey);
   if (existing) {
-    const cached = existing as CandleHistory;
-    if (hasRenderableCandleHistory(cached.candles, normalizedLimit)) return cached;
+    const cached = existing.payload as CandleHistory;
+    if (hasRenderableCandleHistory(cached.candles, normalizedLimit)) {
+      return {
+        history: cached,
+        cache: {
+          cacheStatus: existing.cacheLayer,
+          sourceFetchedAt: cached.fetchedAt,
+          cachedAt: existing.cachedAt.toISOString(),
+          expiresAt: existing.expiresAt.toISOString(),
+          isStale: false,
+        },
+      };
+    }
   }
   return candleCacheCoalescer.run(cacheKey, async () => {
     const history = await fetchHistory(symbol, exchange, interval, range, normalizedLimit, before);
+    const expiresAt = new Date(Date.now() + candleCacheTtlMs(interval));
+    const cachedAt = new Date();
     try {
       await saveMarketSnapshot({
         cacheKey, market: "candles", exchange, timeframe: candleSnapshotTimeframe(interval), payload: history,
-        expiresAt: new Date(Date.now() + candleCacheTtlMs(interval)),
+        expiresAt,
       });
     } catch (error) {
       // الكاش تحسين أداء فقط؛ لا يجب أن يحجب تاريخ السعر الصحيح عن المخطط.
       console.warn(`[Candles] Failed to persist cache for ${cacheKey}; returning fresh history`, error instanceof Error ? error.message : String(error));
     }
-    return history;
+    return {
+      history,
+      cache: { cacheStatus: "fresh", sourceFetchedAt: history.fetchedAt, cachedAt: cachedAt.toISOString(), expiresAt: expiresAt.toISOString(), isStale: false },
+    };
   });
 }

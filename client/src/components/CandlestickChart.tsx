@@ -978,6 +978,9 @@ export function CandlestickChart(props: { symbol: string; exchange: string; onCr
               <span className="font-mono text-muted-foreground">
                 الشموع: {candlesQuery.data.provider === "twelve-data" ? "Twelve Data مرخّص" : "Yahoo Finance احتياطي"}
               </span>
+              {candlesQuery.data.cache ? <span className="font-mono text-muted-foreground" title={`آخر حفظ للكاش: ${new Date(candlesQuery.data.cache.cachedAt).toLocaleString("ar-EG")}`}>
+                {candlesQuery.data.cache.cacheStatus === "fresh" ? "جُلبت الآن" : candlesQuery.data.cache.cacheStatus === "memory" ? "ذاكرة الخادم" : "لقطة مخزنة"}
+              </span> : null}
               {preferences.confluenceIct.enabled ? <>{showIctTrend ? <span className="font-mono text-amber-300">━ EMA ICT</span> : null}{showIctLiquidity ? <span className="font-mono text-cyan-300">┅ BSL / SSL</span> : null}{showIctZones ? <span className="font-mono text-violet-300">┈ OB / FVG</span> : null}{showIctStructure || showIctSignals ? <span className="font-mono text-emerald-300">↑↓ BOS / CHoCH / Sweep</span> : null}</> : null}
               {showLegacyVolume && hasVolume && <span className="font-mono text-sky-300/80">▪ الحجم</span>}
               {candlesQuery.data.regularMarketPrice != null ? (

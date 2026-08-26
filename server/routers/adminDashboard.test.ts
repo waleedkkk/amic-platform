@@ -14,4 +14,10 @@ describe("adminDashboardRouter authorization", () => {
 
     await expect(caller.cleanupExpiredSnapshots()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("يرفض قراءة ملخص أداء الكاش عند المستخدم العادي", async () => {
+    const caller = adminDashboardRouter.createCaller({ user: { id: 7, role: "user" } } as never);
+
+    await expect(caller.marketPerformance()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });
