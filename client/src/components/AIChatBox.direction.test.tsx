@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AIChatBox } from "@/components/AIChatBox";
 
@@ -37,6 +37,7 @@ describe("اتجاه محتوى مساعد AMIC المختلط", () => {
   it("يبقي الرمز التعبيري والرابط داخل رد عربي بمحاذاة RTL", () => {
     renderChat("ar", "📈 راجع [مصدر الذهب](https://example.com/gold) قبل متابعة القراءة. السعر 4,625.292.");
 
+    fireEvent.click(screen.getByRole("button", { name: "عرض الرد كاملًا" }));
     const link = screen.getByRole("link", { name: "مصدر الذهب" });
     const markdown = link.closest(".assistant-markdown");
 
@@ -49,6 +50,7 @@ describe("اتجاه محتوى مساعد AMIC المختلط", () => {
   it("يبقي الرابط داخل رد إنجليزي بمحاذاة LTR", () => {
     renderChat("en", "📈 Review the [gold source](https://example.com/gold) before continuing.");
 
+    fireEvent.click(screen.getByRole("button", { name: "Show full reply" }));
     const link = screen.getByRole("link", { name: "gold source" });
     const markdown = link.closest(".assistant-markdown");
 

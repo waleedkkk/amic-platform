@@ -2,9 +2,10 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getAssistantBubbleAlignment, getChatDirection, getChatMarkdownDirection, getChatTextAlignment } from "@/lib/chatDirection";
+import { getTypingInterval, getTypingPreview, getTypingUnits } from "@/lib/chatTyping";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { Clock3, DatabaseZap, Loader2, Send, User, Sparkles } from "lucide-react";
+import { Clock3, DatabaseZap, Loader2, Send, User, Sparkles, SkipForward } from "lucide-react";
 import React, { useState, useEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
 
@@ -140,9 +141,59 @@ export function AIChatBox({
   const textAlignment = getChatTextAlignment(language);
   const assistantBubbleAlignment = getAssistantBubbleAlignment(language);
   const markdownDirection = getChatMarkdownDirection(language);
+  const [visibleTypingUnits, setVisibleTypingUnits] = useState(0);
+  const [typingSkipped, setTypingSkipped] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mediaQuery) return;
+
+    const updatePreference = () => setPrefersReducedMotion(mediaQuery.matches);
+    updatePreference();
+    mediaQuery.addEventListener?.("change", updatePreference);
+    return () => mediaQuery.removeEventListener?.("change", updatePreference);
+  }, []);
 
   // Filter out system messages
   const displayMessages = messages.filter((msg) => msg.role !== "system");
+
+  const lastAssistantMessage = [...displayMessages].reverse().find((msg) => msg.role === "assistant");
+  const lastAssistantMessageIndex = lastAssistantMessage
+    ? displayMessages.lastIndexOf(lastAssistantMessage)
+    : -1;
+  const typingMessageKey = lastAssistantMessage
+    ? `${lastAssistantMessageIndex}:${lastAssistantMessage.content}`
+    : null;
+  const typingUnits = lastAssistantMessage ? getTypingUnits(lastAssistantMessage.content) : [];
+
+  useEffect(() => {
+    if (!typingMessageKey || !lastAssistantMessage) {
+      setVisibleTypingUnits(0);
+      setTypingSkipped(false);
+      return;
+    }
+
+    setVisibleTypingUnits(prefersReducedMotion ? typingUnits.length : 0);
+    setTypingSkipped(prefersReducedMotion);
+  }, [lastAssistantMessage?.content, prefersReducedMotion, typingMessageKey]);
+
+  useEffect(() => {
+    if (
+      !typingMessageKey ||
+      typingSkipped ||
+      prefersReducedMotion ||
+      visibleTypingUnits >= typingUnits.length
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setVisibleTypingUnits((current) => Math.min(current + 1, typingUnits.length));
+    }, getTypingInterval(lastAssistantMessage?.content ?? ""));
+
+    return () => window.clearTimeout(timer);
+  }, [lastAssistantMessage?.content, prefersReducedMotion, typingMessageKey, typingSkipped, typingUnits.length, visibleTypingUnits]);
 
   // Calculate min-height for last assistant message to push user message to top
   const [minHeightForLastMessage, setMinHeightForLastMessage] = useState(0);
@@ -247,6 +298,19 @@ export function AIChatBox({
                 const shouldApplyMinHeight =
                   isLastMessage && !isLoading && minHeightForLastMessage > 0;
 
+                const isTypingAssistantMessage =
+                  message.role === "assistant" &&
+                  index === lastAssistantMessageIndex &&
+                  typingMessageKey === `${index}:${message.content}`;
+                const isTypingInProgress =
+                  isTypingAssistantMessage &&
+                  !typingSkipped &&
+                  !prefersReducedMotion &&
+                  visibleTypingUnits < getTypingUnits(message.content).length;
+                const messageContent = isTypingAssistantMessage
+                  ? getTypingPreview(message.content, visibleTypingUnits)
+                  : message.content;
+
                 return (
                   <div
                     key={index}
@@ -281,8 +345,22 @@ export function AIChatBox({
                       {message.role === "assistant" ? (
                         <div className="space-y-3">
                           <div dir={markdownDirection.direction} className={cn("assistant-markdown prose prose-sm dark:prose-invert max-w-none", markdownDirection.alignment, markdownDirection.className)}>
-                            <Streamdown>{message.content}</Streamdown>
+                            <Streamdown>{messageContent}</Streamdown>
                           </div>
+                          {isTypingInProgress && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTypingSkipped(true);
+                                setVisibleTypingUnits(getTypingUnits(message.content).length);
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              aria-label={language === "ar" ? "عرض الرد كاملًا" : "Show full reply"}
+                            >
+                              <SkipForward className="size-3.5" aria-hidden="true" />
+                              {language === "ar" ? "عرض الرد كاملًا" : "Show full reply"}
+                            </button>
+                          )}
                           {message.toolActivity && message.toolActivity.length > 0 && (
                             <div dir={direction} className="flex flex-wrap gap-2 border-t border-border/70 pt-3" aria-label="مصادر بيانات التحليل">
                               {message.toolActivity.map((activity, activityIndex) => (
