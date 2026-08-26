@@ -1,11 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { getAssistantBubbleAlignment, getChatDirection, getChatTextAlignment } from "@/lib/chatDirection";
+import { getAssistantBubbleAlignment, getChatDirection, getChatMarkdownDirection, getChatTextAlignment } from "@/lib/chatDirection";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Clock3, DatabaseZap, Loader2, Send, User, Sparkles } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
 
 /**
@@ -139,6 +139,7 @@ export function AIChatBox({
   const direction = getChatDirection(language);
   const textAlignment = getChatTextAlignment(language);
   const assistantBubbleAlignment = getAssistantBubbleAlignment(language);
+  const markdownDirection = getChatMarkdownDirection(language);
 
   // Filter out system messages
   const displayMessages = messages.filter((msg) => msg.role !== "system");
@@ -267,10 +268,11 @@ export function AIChatBox({
                       </div>
                     )}
 
-                    <div
-                      className={cn(
-                        "max-w-[80%] rounded-lg px-4 py-2.5",
-                        textAlignment,
+                      <div
+                        dir={direction}
+                        className={cn(
+                          "max-w-[80%] rounded-lg px-4 py-2.5",
+                          textAlignment,
                         message.role === "user"
                           ? "bg-primary text-primary-foreground"
                           : "bg-muted text-foreground"
@@ -278,11 +280,11 @@ export function AIChatBox({
                     >
                       {message.role === "assistant" ? (
                         <div className="space-y-3">
-                          <div className={cn("prose prose-sm dark:prose-invert max-w-none", textAlignment)}>
+                          <div dir={markdownDirection.direction} className={cn("assistant-markdown prose prose-sm dark:prose-invert max-w-none", markdownDirection.alignment, markdownDirection.className)}>
                             <Streamdown>{message.content}</Streamdown>
                           </div>
                           {message.toolActivity && message.toolActivity.length > 0 && (
-                            <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3" aria-label="مصادر بيانات التحليل">
+                            <div dir={direction} className="flex flex-wrap gap-2 border-t border-border/70 pt-3" aria-label="مصادر بيانات التحليل">
                               {message.toolActivity.map((activity, activityIndex) => (
                                 <div key={`${activity.toolName}-${activity.fetchedAt}-${activityIndex}`} className="inline-flex items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-[11px] leading-5 text-muted-foreground">
                                   <DatabaseZap className="size-3 text-primary" aria-hidden="true" />
@@ -296,7 +298,7 @@ export function AIChatBox({
                           )}
                         </div>
                       ) : (
-                        <p className="whitespace-pre-wrap text-sm">
+                        <p dir={direction} className={cn("whitespace-pre-wrap text-sm", textAlignment)}>
                           {message.content}
                         </p>
                       )}

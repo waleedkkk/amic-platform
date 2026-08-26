@@ -70,4 +70,12 @@
   }
   .panel-glow { box-shadow: 0 20px 65px rgb(0 0 0 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.035); }
   .text-fade { background: linear-gradient(90deg, #c7d6e6 0%, #7f94aa 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  /* Streamdown ينشئ عقد Markdown داخلية؛ الاتجاه على الحاوية الخارجية وحده لا يكفي لمحاذاتها. */
+  .assistant-markdown-rtl { direction: rtl; text-align: right; unicode-bidi: plaintext; }
+  .assistant-markdown-rtl :is(p, h1, h2, h3, h4, h5, h6, blockquote) { text-align: right; }
+  .assistant-markdown-rtl :is(ul, ol) { direction: rtl; text-align: right; padding-inline-start: 1.5rem; padding-inline-end: 0; }
+  .assistant-markdown-rtl li { text-align: right; }
+  .assistant-markdown-rtl :is(pre, code) { direction: ltr; text-align: left; unicode-bidi: isolate; }
+  .assistant-markdown-ltr { direction: ltr; text-align: left; unicode-bidi: plaintext; }
 }
