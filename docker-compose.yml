@@ -18,11 +18,16 @@ services:
     environment:
       NODE_ENV: production
       PORT: ${APP_PORT:-3000}
+      REDIS_URL: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
       MCP_SERVICE_URL: http://tradingview-mcp:8000/mcp
     ports:
       - "${APP_PORT:-3000}:${APP_PORT:-3000}"
     depends_on:
       tradingview-mcp:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - amic-internal
@@ -43,6 +48,36 @@ services:
     networks:
       - amic-internal
 
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command:
+      [
+        "sh",
+        "-c",
+        'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"',
+      ]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping | grep -q PONG',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    expose:
+      - "6379"
+    networks:
+      - amic-internal
+
 networks:
   amic-internal:
     driver: bridge
+
+volumes:
+  redis-data:

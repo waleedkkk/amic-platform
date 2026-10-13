@@ -5,6 +5,10 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
 import { getRequiredJwtSecret } from "./env";
+import {
+  createAuthRateLimiters,
+  createTrpcAuthRateLimitMiddleware,
+} from "./authRateLimit";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { handleMetalAlertsSchedule } from "../scheduledMetalAlerts";
@@ -36,9 +40,20 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   // Fail closed: a predictable or missing session secret must never reach a live server.
   getRequiredJwtSecret();
+  const authRateLimiters = await createAuthRateLimiters();
   const app = express();
+  const trustProxyHops = process.env.TRUST_PROXY_HOPS?.trim();
+  if (trustProxyHops) {
+    const hops = Number(trustProxyHops);
+    if (!Number.isSafeInteger(hops) || hops < 0) {
+      throw new Error("TRUST_PROXY_HOPS must be a non-negative integer.");
+    }
+    app.set("trust proxy", hops);
+  }
   const server = createServer(app);
   attachPaperTradeWebSocket(server);
+  // Limit login and registration (including batched tRPC calls) before parsing, DB, and bcrypt.
+  app.use("/api/trpc", createTrpcAuthRateLimitMiddleware(authRateLimiters));
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -53,8 +68,14 @@ async function startServer() {
   );
   app.post("/api/scheduled/metal-alerts", handleMetalAlertsSchedule);
   app.post("/api/scheduled/economic-calendar", handleEconomicCalendarSchedule);
-  app.post("/api/scheduled/daily-market-digest", handleDailyMarketDigestSchedule);
-  app.post("/api/scheduled/market-snapshot-cleanup", handleMarketSnapshotCleanupSchedule);
+  app.post(
+    "/api/scheduled/daily-market-digest",
+    handleDailyMarketDigestSchedule
+  );
+  app.post(
+    "/api/scheduled/market-snapshot-cleanup",
+    handleMarketSnapshotCleanupSchedule
+  );
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
@@ -77,5 +98,7 @@ async function startServer() {
 import { seedAdminUser } from "../seedAdmin";
 
 startServer()
-  .then(() => seedAdminUser().catch(error => console.error("[Admin seed] failed:", error)))
+  .then(() =>
+    seedAdminUser().catch(error => console.error("[Admin seed] failed:", error))
+  )
   .catch(console.error);

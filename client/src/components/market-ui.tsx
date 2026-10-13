@@ -109,6 +109,18 @@ export function LoadState({ loading, error, children }: { loading: boolean; erro
   return <>{children}</>;
 }
 
+export function QueryErrorState({ message, onRetry, isRetrying }: { message: string; onRetry: () => void; isRetrying: boolean }) {
+  return (
+    <div role="alert" aria-live="assertive" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/5 p-4 text-sm leading-6 text-rose-200">
+      <p>{message}</p>
+      <Button type="button" variant="outline" size="sm" onClick={onRetry} disabled={isRetrying} aria-busy={isRetrying}>
+        <RefreshCw className={cn("ml-2 size-4", isRetrying && "animate-spin")} />
+        {isRetrying ? "جارٍ إعادة المحاولة…" : "إعادة المحاولة"}
+      </Button>
+    </div>
+  );
+}
+
 export function EmptyAction({ title, description, href, action }: { title: string; description: string; href: string; action: string }) {
   return (
     <div className="rounded-xl border border-dashed border-white/10 px-5 py-8 text-center">

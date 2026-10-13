@@ -1,5 +1,5 @@
 import { TradeDecisionReadinessCard } from "@/components/TradeDecisionReadinessCard";
-import { EmptyAction, formatValue, PageHeading, Panel, SignalBadge } from "@/components/market-ui";
+import { EmptyAction, formatValue, PageHeading, Panel, QueryErrorState, SignalBadge } from "@/components/market-ui";
 import { PaperTradeAlertCenter } from "@/components/PaperTradeAlertCenter";
 import { PaperTradeCloseProgress, type PaperTradeCloseProgressStage } from "@/components/PaperTradeCloseProgress";
 import { ContextHelp } from "@/components/ContextHelp";
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { assessTradeRisk, consumePaperTradeDraft, type RiskLevelSource } from "@/lib/paperTradeDraft";
 import { trpc } from "@/lib/trpc";
+import { getQueryViewState } from "@/lib/queryViewState";
 import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, ChartNoAxesCombined, ShieldAlert, Target, WalletCards } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -143,6 +144,12 @@ export default function PaperTrading() {
 
   const openTrades = trades.data?.filter(trade => trade.status === "open") ?? [];
   const closedTrades = trades.data?.filter(trade => trade.status === "closed") ?? [];
+  const tradesViewState = getQueryViewState({
+    isLoading: trades.isLoading,
+    isError: trades.isError,
+    hasData: trades.data !== undefined,
+    hasItems: openTrades.length > 0 || closedTrades.length > 0,
+  });
 
   useEffect(() => {
     const latestAlert = alerts[0];
@@ -182,6 +189,8 @@ export default function PaperTrading() {
 
   return <>
     <PageHeading eyebrow="PAPER PORTFOLIO" title="التداول الورقي" description="محاكاة تعليمية فقط: اختر الأصل، حدّد خطة المخاطرة، راجع التحذيرات، ثم افتح أو أغلق الصفقة داخل حسابك. لا تُرسل أوامر حقيقية." action={<PaperTradeAlertCenter alerts={alerts} status={paperTradeSocketStatus} onDismiss={dismissAlert} onClear={clearAlerts} onSelect={handleAlertSelect} />} />
+    {tradesViewState === "error" ? <div className="mb-5"><QueryErrorState message="تعذر تحميل بيانات الصفقات." onRetry={() => void trades.refetch()} isRetrying={trades.isFetching} /></div> : null}
+    {tradesViewState === "stale" ? <div className="mb-5"><QueryErrorState message="تعذر تحديث بيانات الصفقات؛ نعرض آخر بيانات تم تحميلها." onRetry={() => void trades.refetch()} isRetrying={trades.isFetching} /></div> : null}
     {closeSuccess ? <PaperTradeCloseProgress stage="completed" completionMessage={`أُغلقت ${closeSuccess.symbol} بنجاح. الربح/الخسارة المحققة: ${formatValue(closeSuccess.realizedPnl, 4)}.`} onCompletionDismiss={() => setCloseSuccess(null)} className="mb-6" /> : null}
     <div className="mb-6 grid gap-3 sm:grid-cols-4">
       {[["إجمالي الصفقات", summary.data?.totalTrades ?? "—"], ["المفتوحة", summary.data?.openTrades ?? "—"], ["نسبة النجاح", summary.data?.winRate === null || summary.data?.winRate === undefined ? "—" : `${summary.data.winRate}%`], ["الربح/الخسارة المحققة", summary.data ? formatValue(summary.data.realizedPnl, 5) : "—"]].map(([label, value]) => <Panel key={String(label)} className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><ChartNoAxesCombined className="size-3.5 text-primary" />{label}</div><p className="mt-2 font-mono text-lg">{value}</p></Panel>)}
@@ -207,11 +216,11 @@ export default function PaperTrading() {
         </form>
       </Panel>
       <div className="space-y-4">
-        <Panel><div className="mb-5 flex items-center justify-between gap-3"><div><h2 className="font-semibold">المراكز المفتوحة</h2><p className="mt-1 text-xs text-muted-foreground">{trades.isLoading ? "—" : `${openTrades.length} مركز ضمن حسابك`}</p></div><SignalBadge value="neutral" /></div>{trades.isLoading ? <p className="text-sm text-muted-foreground">جارٍ تحميل المراكز…</p> : openTrades.length ? <div className="space-y-3">{openTrades.map(trade => {
+        <Panel><div className="mb-5 flex items-center justify-between gap-3"><div><h2 className="font-semibold">المراكز المفتوحة</h2><p className="mt-1 text-xs text-muted-foreground">{trades.isLoading ? "—" : `${openTrades.length} مركز ضمن حسابك`}</p></div><SignalBadge value="neutral" /></div>{tradesViewState === "loading" ? <p role="status" className="text-sm text-muted-foreground">جارٍ تحميل المراكز…</p> : tradesViewState === "error" ? <p role="alert" className="text-sm text-rose-200">تعذر تحميل المراكز. أعد المحاولة من التنبيه أعلى الصفحة.</p> : openTrades.length ? <div className="space-y-3">{openTrades.map(trade => {
           const activeCloseStage = closeProgress?.tradeId === trade.id ? closeProgress.stage : null;
           return <div key={trade.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4"><div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between"><div><p className="font-mono text-sm font-medium">{trade.symbol} <span className="text-muted-foreground">· {trade.exchange}</span></p><p className="mt-1 text-xs leading-5 text-muted-foreground">{trade.side === "long" ? "Long" : "Short"} · كمية {formatValue(trade.quantity, 6)} · دخول {formatValue(trade.entryPrice, 6)}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">SL: {trade.stopLoss ? formatValue(trade.stopLoss, 6) : "—"} · TP: {trade.takeProfit ? formatValue(trade.takeProfit, 6) : "—"}</p></div><div className="flex flex-col gap-2 min-[420px]:flex-row"><div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground">{referencePrices.isLoading ? "جارٍ جلب السعر المرجعي…" : referenceByAsset.get(paperTradeAssetKey(trade.symbol, trade.exchange))?.price ? `آخر سعر معروف: ${formatValue(referenceByAsset.get(paperTradeAssetKey(trade.symbol, trade.exchange))!.price, 6)}` : "لا يتوفر سعر مرجعي حالي"}</p><Input aria-label="سعر الإغلاق" inputMode="decimal" placeholder="سعر الإغلاق" className="h-11 w-full bg-black/15 font-mono text-sm min-[420px]:h-9 min-[420px]:w-28 min-[420px]:text-xs" value={closePrices[trade.id] ?? ""} onChange={event => { setClosePrices({ ...closePrices, [trade.id]: event.target.value }); setCloseProgress(current => current?.tradeId === trade.id ? null : current); }} /><Button size="sm" variant="outline" className="min-h-11 w-full bg-white/[0.03] min-[420px]:min-h-0 min-[420px]:w-auto" disabled={!closePrices[trade.id] || close.isPending} onClick={() => requestClose(trade.id)}><ArrowDownToLine className="ml-1 size-3.5" />{activeCloseStage === "checking" ? "جارٍ الفحص…" : "إغلاق"}</Button></div></div></div>{activeCloseStage ? <PaperTradeCloseProgress stage={activeCloseStage} compact className="mt-3" /> : null}</div>;
         })}</div> : <EmptyAction title="لا توجد مراكز مفتوحة" description="عند فتح صفقة محاكاة ستظهر هنا مع أداة لإغلاقها وحساب الربح أو الخسارة." href="/analysis" action="راجع التحليل أولًا" />}</Panel>
-        <Panel><h2 className="font-semibold">سجل الصفقات المغلقة</h2><div className="mt-4 space-y-2">{closedTrades.length ? closedTrades.slice(0, 8).map(trade => <div key={trade.id} className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] px-3 py-2 text-sm"><span className="truncate font-mono">{trade.symbol}</span><span className={Number(trade.realizedPnl) >= 0 ? "shrink-0 font-mono text-emerald-300" : "shrink-0 font-mono text-rose-300"}>{formatValue(trade.realizedPnl, 5)}</span></div>) : <p className="text-sm text-muted-foreground">لا توجد صفقات مغلقة بعد.</p>}</div></Panel>
+        <Panel><h2 className="font-semibold">سجل الصفقات المغلقة</h2><div className="mt-4 space-y-2">{tradesViewState === "loading" ? <p role="status" className="text-sm text-muted-foreground">جارٍ تحميل سجل الصفقات…</p> : tradesViewState === "error" ? <p role="alert" className="text-sm text-rose-200">تعذر تحميل سجل الصفقات. أعد المحاولة من التنبيه أعلى الصفحة.</p> : closedTrades.length ? closedTrades.slice(0, 8).map(trade => <div key={trade.id} className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] px-3 py-2 text-sm"><span className="truncate font-mono">{trade.symbol}</span><span className={Number(trade.realizedPnl) >= 0 ? "shrink-0 font-mono text-emerald-300" : "shrink-0 font-mono text-rose-300"}>{formatValue(trade.realizedPnl, 5)}</span></div>) : <p className="text-sm text-muted-foreground">لا توجد صفقات مغلقة بعد.</p>}</div></Panel>
       </div>
     </div>
     <AlertDialog open={Boolean(pendingClose)} onOpenChange={openState => { if (!openState && !close.isPending) { setCloseProgress(current => current?.tradeId === pendingClose?.id ? null : current); setPendingClose(null); } }}>

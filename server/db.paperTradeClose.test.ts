@@ -6,10 +6,12 @@ const databaseMocks = vi.hoisted(() => ({
 }));
 const candleMocks = vi.hoisted(() => ({ getCandleHistoryCached: vi.fn() }));
 
-vi.mock("drizzle-orm/mysql2", () => ({ drizzle: vi.fn(() => databaseMocks) }));
+vi.mock("drizzle-orm/postgres-js", () => ({
+  drizzle: vi.fn(() => databaseMocks),
+}));
 vi.mock("./candles", () => candleMocks);
 
-process.env.DATABASE_URL = "mysql://test:test@localhost/test";
+process.env.DATABASE_URL = "postgresql://test:test@localhost/test";
 const { closeUserPaperTrade } = await import("./db");
 
 const trade = {
@@ -56,7 +58,9 @@ describe("closeUserPaperTrade reference validation", () => {
       provider: "twelve-data",
       fetchedAt: "2026-08-25T10:00:00.000Z",
       regularMarketPrice: 100,
-      candles: [{ time: 1, open: 99, high: 101, low: 98, close: 100, volume: 10 }],
+      candles: [
+        { time: 1, open: 99, high: 101, low: 98, close: 100, volume: 10 },
+      ],
     });
   });
 
@@ -65,31 +69,64 @@ describe("closeUserPaperTrade reference validation", () => {
   it("يغلق السعر القريب دون تحذير ويحفظ النسبة المرجعية", async () => {
     const result = await closeUserPaperTrade(71, 9, "104");
 
-    expect(result).toMatchObject({ closed: true, requiresConfirmation: false, priceDeviationWarning: false, priceDeviationPercent: 4, referencePrice: "100.00000000" });
+    expect(result).toMatchObject({
+      closed: true,
+      requiresConfirmation: false,
+      priceDeviationWarning: false,
+      priceDeviationPercent: 4,
+      referencePrice: "100.00000000",
+    });
     expect(databaseMocks.update).toHaveBeenCalledTimes(1);
   });
 
   it("يعيد طلب تأكيد ولا ينفذ التحديث عند تجاوز العتبة", async () => {
     const result = await closeUserPaperTrade(71, 9, "110");
 
-    expect(result).toMatchObject({ closed: false, requiresConfirmation: true, priceDeviationWarning: true, priceDeviationPercent: 10, referencePrice: "100.00000000" });
+    expect(result).toMatchObject({
+      closed: false,
+      requiresConfirmation: true,
+      priceDeviationWarning: true,
+      priceDeviationPercent: 10,
+      referencePrice: "100.00000000",
+    });
     expect(databaseMocks.update).not.toHaveBeenCalled();
   });
 
   it("ينفذ الإغلاق بعد التأكيد الصريح ويحفظ علم الانحراف", async () => {
     const { set } = prepareDatabase();
-    const result = await closeUserPaperTrade(71, 9, "110", { confirmPriceDeviation: true });
+    const result = await closeUserPaperTrade(71, 9, "110", {
+      confirmPriceDeviation: true,
+    });
 
-    expect(result).toMatchObject({ closed: true, requiresConfirmation: false, priceDeviationWarning: true, priceDeviationPercent: 10 });
-    expect(set).toHaveBeenCalledWith(expect.objectContaining({ priceDeviationWarning: 1, priceDeviationPercent: "10.0000", referencePriceAtClose: "100.00000000" }));
+    expect(result).toMatchObject({
+      closed: true,
+      requiresConfirmation: false,
+      priceDeviationWarning: true,
+      priceDeviationPercent: 10,
+    });
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        priceDeviationWarning: 1,
+        priceDeviationPercent: "10.0000",
+        referencePriceAtClose: "100.00000000",
+      })
+    );
   });
 
   it("يكمل الإغلاق دون تحذير عند غياب السعر المرجعي", async () => {
-    candleMocks.getCandleHistoryCached.mockRejectedValue(new Error("provider unavailable"));
+    candleMocks.getCandleHistoryCached.mockRejectedValue(
+      new Error("provider unavailable")
+    );
 
     const result = await closeUserPaperTrade(71, 9, "110");
 
-    expect(result).toMatchObject({ closed: true, requiresConfirmation: false, priceDeviationWarning: false, priceDeviationPercent: null, referencePrice: null });
+    expect(result).toMatchObject({
+      closed: true,
+      requiresConfirmation: false,
+      priceDeviationWarning: false,
+      priceDeviationPercent: null,
+      referencePrice: null,
+    });
     expect(databaseMocks.update).toHaveBeenCalledTimes(1);
   });
 });

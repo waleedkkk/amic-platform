@@ -1,0 +1,1 @@
+CREATE INDEX "ai_provider_settings_updated_by_idx" ON "aiProviderSettings" USING btree ("updatedByUserId");

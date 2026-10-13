@@ -8,6 +8,7 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://127.0.0.1:3000",
+    serviceWorkers: "block",
     locale: "ar-EG",
     timezoneId: "Asia/Riyadh",
     colorScheme: "dark",
@@ -26,7 +27,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm dev",
+    command:
+      "JWT_SECRET=e2e-only-test-secret-not-for-production DATABASE_URL='' OAUTH_SERVER_URL=http://127.0.0.1:3000 pnpm dev",
     url: "http://127.0.0.1:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

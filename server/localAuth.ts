@@ -124,7 +124,7 @@ export async function createUserWithEmail(
       name: name?.trim() || null,
       loginMethod: "email",
     })
-    .$returningId();
+    .returning({ id: users.id });
 
   const [user] = await (await requireDb()).select().from(users).where(eq(users.id, inserted.id)).limit(1);
   if (!user) throw new AuthError("not_signed_in", "تعذّر إنشاء الحساب");
