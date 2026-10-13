@@ -34,11 +34,11 @@ function renderChat(language: "ar" | "en", content: string) {
 describe("اتجاه محتوى مساعد AMIC المختلط", () => {
   beforeEach(() => { i18nState.language = "ar"; });
 
-  it("يبقي الرمز التعبيري والرابط داخل رد عربي بمحاذاة RTL", () => {
+  it("يبقي الرمز التعبيري والرابط داخل رد عربي بمحاذاة RTL", async () => {
     renderChat("ar", "📈 راجع [مصدر الذهب](https://example.com/gold) قبل متابعة القراءة. السعر 4,625.292.");
 
     fireEvent.click(screen.getByRole("button", { name: "عرض الرد كاملًا" }));
-    const link = screen.getByRole("link", { name: "مصدر الذهب" });
+    const link = await screen.findByRole("link", { name: "مصدر الذهب" });
     const markdown = link.closest(".assistant-markdown");
 
     expect(markdown?.getAttribute("dir")).toBe("rtl");
@@ -47,11 +47,11 @@ describe("اتجاه محتوى مساعد AMIC المختلط", () => {
     expect(link.getAttribute("href")).toBe("https://example.com/gold");
   });
 
-  it("يبقي الرابط داخل رد إنجليزي بمحاذاة LTR", () => {
+  it("يبقي الرابط داخل رد إنجليزي بمحاذاة LTR", async () => {
     renderChat("en", "📈 Review the [gold source](https://example.com/gold) before continuing.");
 
     fireEvent.click(screen.getByRole("button", { name: "Show full reply" }));
-    const link = screen.getByRole("link", { name: "gold source" });
+    const link = await screen.findByRole("link", { name: "gold source" });
     const markdown = link.closest(".assistant-markdown");
 
     expect(markdown?.getAttribute("dir")).toBe("ltr");

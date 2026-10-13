@@ -1,5 +1,3 @@
-import { AdminAiProviderSettings } from "@/components/AdminAiProviderSettings";
-import { AdminOperationsDashboard } from "@/components/AdminOperationsDashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +8,18 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ADMIN_TABS, type AdminTabValue } from "./adminTabs";
 import { Bot, Clock3, DatabaseZap, LayoutDashboard, Search, Settings2, ShieldCheck, UsersRound } from "lucide-react";
-import { useMemo, useState, type ComponentType } from "react";
+import { lazy, Suspense, useMemo, useState, type ComponentType } from "react";
+
+const AdminOperationsDashboard = lazy(() =>
+  import("@/components/AdminOperationsDashboard").then(module => ({
+    default: module.AdminOperationsDashboard,
+  }))
+);
+const AdminAiProviderSettings = lazy(() =>
+  import("@/components/AdminAiProviderSettings").then(module => ({
+    default: module.AdminAiProviderSettings,
+  }))
+);
 
 const tabIcons: Record<AdminTabValue, ComponentType<{ className?: string }>> = {
   overview: LayoutDashboard,
@@ -21,7 +30,10 @@ const tabIcons: Record<AdminTabValue, ComponentType<{ className?: string }>> = {
 
 export default function AdminUsers() {
   const { user } = useAuth();
-  const { data, isLoading, error } = trpc.auth.admin.listUsers.useQuery(undefined, { enabled: user?.role === "admin" });
+  const [activeTab, setActiveTab] = useState<AdminTabValue>("overview");
+  const { data, isLoading, error } = trpc.auth.admin.listUsers.useQuery(undefined, {
+    enabled: user?.role === "admin" && activeTab === "users",
+  });
   const registerCleanup = trpc.auth.admin.heartbeat.registerMarketSnapshotCleanup.useMutation();
   const [userSearch, setUserSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "user">("all");
@@ -50,7 +62,7 @@ export default function AdminUsers() {
       <PageHeading eyebrow="ADMINISTRATION" title="مركز الإدارة" description="إدارة المستخدمين والخدمات وكاش السوق من مساحة إدارية محمية ومنظمة." />
 
       {user?.role !== "admin" ? <Panel><div className="flex min-h-40 items-center justify-center gap-3 text-sm text-muted-foreground">لا تملك صلاحيات الوصول إلى لوحة الإدارة.</div></Panel> : (
-        <Tabs defaultValue="overview" dir="rtl" className="space-y-5">
+        <Tabs value={activeTab} onValueChange={value => setActiveTab(value as AdminTabValue)} dir="rtl" className="space-y-5">
           <div className="rounded-2xl border border-border/70 bg-card/70 p-1.5 shadow-sm">
             <TabsList aria-label="أقسام مركز الإدارة" className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-muted/50 p-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {ADMIN_TABS.map(tab => {
@@ -61,7 +73,7 @@ export default function AdminUsers() {
             <p className="px-3 pb-1 pt-2 text-xs text-muted-foreground">اسحب أفقيًا على الهاتف لاستعراض الأقسام؛ التبويبات تدعم لوحة المفاتيح وحلقة تركيز ظاهرة.</p>
           </div>
 
-          <TabsContent value="overview" className="mt-0 space-y-4 focus-visible:ring-2 focus-visible:ring-ring/60"><AdminOperationsDashboard view="overview" /></TabsContent>
+          <TabsContent value="overview" className="mt-0 space-y-4 focus-visible:ring-2 focus-visible:ring-ring/60"><Suspense fallback={<Panel><div role="status" className="py-8 text-center text-sm text-muted-foreground">جارٍ تحميل لوحة المؤشرات…</div></Panel>}><AdminOperationsDashboard view="overview" /></Suspense></TabsContent>
 
           <TabsContent value="users" className="mt-0 focus-visible:ring-2 focus-visible:ring-ring/60">
             <LoadState loading={isLoading} error={error}>
@@ -75,12 +87,12 @@ export default function AdminUsers() {
           </TabsContent>
 
           <TabsContent value="ai" className="mt-0 space-y-4 focus-visible:ring-2 focus-visible:ring-ring/60">
-            <AdminAiProviderSettings />
+            <Suspense fallback={<Panel><div role="status" className="py-8 text-center text-sm text-muted-foreground">جارٍ تحميل إعدادات الذكاء الاصطناعي…</div></Panel>}><AdminAiProviderSettings /></Suspense>
             <Panel className="border-dashed"><div className="flex gap-3"><Settings2 className="mt-0.5 size-4 shrink-0 text-primary" /><p className="text-xs leading-6 text-muted-foreground">مفاتيح مزودي الذكاء الاصطناعي تُخزّن مشفّرة ولا تظهر مجددًا بعد الحفظ. عند اختيار مزود نشط، يستعمله مساعد AMIC تلقائيًا. ترقية مستخدم إلى مسؤول تتم من قاعدة البيانات فقط.</p></div></Panel>
           </TabsContent>
 
           <TabsContent value="maintenance" className="mt-0 space-y-4 focus-visible:ring-2 focus-visible:ring-ring/60">
-            <AdminOperationsDashboard view="maintenance" />
+            <Suspense fallback={<Panel><div role="status" className="py-8 text-center text-sm text-muted-foreground">جارٍ تحميل أدوات الصيانة…</div></Panel>}><AdminOperationsDashboard view="maintenance" /></Suspense>
             <Panel><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div className="flex gap-3"><Clock3 className="mt-0.5 size-4 shrink-0 text-primary" /><div><p className="text-sm font-medium text-foreground">تنظيف لقطات السوق المجدول</p><p className="mt-1 text-xs leading-5 text-muted-foreground">يسجل مهمة Heartbeat ساعةً بساعة مرة واحدة فقط. لا ينفذ الحذف إلا عندما يطابق معرّف المهمة المسجل في قاعدة البيانات.</p>{registerCleanup.data && <p className="mt-2 text-xs text-emerald-300">{registerCleanup.data.created ? "تم تسجيل المهمة بنجاح." : "المهمة مسجلة بالفعل."} المعرف: {registerCleanup.data.taskUid}</p>}{registerCleanup.error && <p className="mt-2 text-xs text-destructive">تعذر تسجيل المهمة: {registerCleanup.error.message}</p>}</div></div><Button className="min-h-11" onClick={() => registerCleanup.mutate()} disabled={registerCleanup.isPending}>{registerCleanup.isPending ? "جارٍ التسجيل…" : "تسجيل مهمة التنظيف"}</Button></div></Panel>
           </TabsContent>
         </Tabs>

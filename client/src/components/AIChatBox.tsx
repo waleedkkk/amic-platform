@@ -7,7 +7,8 @@ import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Clock3, DatabaseZap, Loader2, Send, User, Sparkles, SkipForward } from "lucide-react";
 import React, { useState, useEffect, useRef } from "react";
-import { Streamdown } from "streamdown";
+
+const LazyAssistantMarkdown = React.lazy(() => import("./AssistantMarkdown"));
 
 /**
  * Message type matching server-side LLM Message interface
@@ -345,7 +346,9 @@ export function AIChatBox({
                       {message.role === "assistant" ? (
                         <div className="space-y-3">
                           <div dir={markdownDirection.direction} className={cn("assistant-markdown prose prose-sm dark:prose-invert max-w-none", markdownDirection.alignment, markdownDirection.className)}>
-                            <Streamdown>{messageContent}</Streamdown>
+                            <React.Suspense fallback={<span className="whitespace-pre-wrap">{messageContent}</span>}>
+                              <LazyAssistantMarkdown content={messageContent} />
+                            </React.Suspense>
                           </div>
                           {isTypingInProgress && (
                             <button
